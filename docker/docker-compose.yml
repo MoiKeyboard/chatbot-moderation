@@ -11,7 +11,7 @@ services:
     environment:
       - FIRESTORE_EMULATOR_HOST=firestore:8080
       - PYTHONUNBUFFERED=1
-      - PYTHONPATH=/app
+
     ports:
       - "8080:8080"
     depends_on:
