@@ -1,23 +1,25 @@
 .PHONY: up down test lint build shell
 
+DC = docker-compose -f docker/docker-compose.yml -p chatbot-moderation
+
 up:
-	docker-compose up --build
+	$(DC) up --build
 
 down:
-	docker-compose down
+	$(DC) down
 
 test:
-	docker-compose run --rm app pytest tests/
+	$(DC) run --rm app pytest tests/
 
 lint:
-	docker-compose run --rm app ruff check src/ tests/
-	docker-compose run --rm app mypy src/
+	$(DC) run --rm app ruff check src/ tests/
+	$(DC) run --rm app mypy src/
 
 format:
-	docker-compose run --rm app ruff format src/ tests/
+	$(DC) run --rm app ruff format src/ tests/
 
 shell:
-	docker-compose run --rm app /bin/bash
+	$(DC) run --rm app /bin/bash
 
 build:
 	docker build -t chatbot-moderation -f docker/Dockerfile.prod .
