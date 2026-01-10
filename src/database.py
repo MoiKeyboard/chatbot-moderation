@@ -1,4 +1,4 @@
-import firebase_admin
+import firebase_admin # type: ignore
 from firebase_admin import credentials, firestore
 from src.config import config
 import structlog
