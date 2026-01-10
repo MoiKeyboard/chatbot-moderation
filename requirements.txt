@@ -1,0 +1,10 @@
+python-telegram-bot~=21.0
+firebase-admin~=6.4
+requests~=2.31
+pydantic~=2.6
+cachetools~=5.3
+tenacity~=8.2
+structlog~=24.1
+google-cloud-logging~=3.0
+flask==3.0.0
+gunicorn==21.2.0

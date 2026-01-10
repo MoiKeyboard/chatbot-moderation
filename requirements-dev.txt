@@ -1,0 +1,9 @@
+pytest~=8.0
+ruff~=0.3
+mypy~=1.8
+types-requests
+types-cachetools
+pytest-mock
+pytest-cov
+watchdog
+pre-commit~=3.6
