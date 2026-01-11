@@ -60,7 +60,7 @@ We use `manage.ps1` (Windows) as a task runner.
 *   **Core**: Python 3.14 (Flask).
 *   **Database**: Google Firestore (NoSQL).
 *   **Hosting**: Designed for Google Cloud Run (Serverless).
-*   **CI/CD**: GitHub Actions (Linting, Testing, Building).
+*   **CI/CD**: GitHub Actions (Test, Lint, Publish to GHCR).
 
 ## ⚠️ Troubleshooting
 
