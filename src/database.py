@@ -1,7 +1,9 @@
 import firebase_admin # type: ignore
 from firebase_admin import credentials, firestore
 from src.config import config
+from src.models import User, MessageLog
 import structlog
+from typing import Optional
 
 logger = structlog.get_logger()
 
@@ -72,3 +74,78 @@ def init_db():
         return None
 
 db = init_db()
+
+async def get_user(user_id: int) -> Optional[User]:
+    """Retrieve user from Firestore."""
+    if not db:
+        return None
+    
+    doc_ref = db.collection('users').document(str(user_id))
+    doc = doc_ref.get()
+    
+    if doc.exists:
+        return User(**doc.to_dict())
+    return None
+
+async def create_or_update_user(user: User):
+    """Create or update user in Firestore."""
+    if not db:
+        return
+        
+    doc_ref = db.collection('users').document(str(user.user_id))
+    doc_ref.set(user.dict(), merge=True)
+
+async def increment_warning(user_id: int):
+    """Increment warning count for a user."""
+    if not db:
+        return
+
+    doc_ref = db.collection('users').document(str(user_id))
+    # In a real app, use a transaction here. simpler for POC.
+    doc = doc_ref.get()
+    if doc.exists:
+        current_data = doc.to_dict()
+        new_count = current_data.get('warning_count', 0) + 1
+        doc_ref.update({'warning_count': new_count})
+    else:
+        # Create user if not exists (simplified)
+        pass 
+
+async def log_message(message: MessageLog):
+    """Log a message to Firestore."""
+    if not db:
+        return
+
+    # Use a subcollection or root collection depending on your query needs. 
+    # Root collection 'messages' is easier for global metrics.
+    doc_ref = db.collection('messages').document(str(message.message_id))
+    doc_ref.set(message.dict())
+
+async def get_global_metrics():
+    """Get basic stats from Firestore."""
+    if not db:
+        return {"error": "Database not connected"}
+    
+    # NOTE: Counting documents in Firestore is expensive ($$$) if you just list them.
+    # For a POC with small data, `.stream()` is okay.
+    # For prod, you'd use Distributed Counters or Aggregation Queries.
+    
+    # Simplified Aggregation (Phase 2 POC way)
+    messages_ref = db.collection('messages')
+    
+    # Get total count (using aggregation query if available in SDK, else stream)
+    # Using count() aggregation which is efficient
+    total_query = messages_ref.count()
+    total_snapshot = total_query.get() 
+    total_messages = total_snapshot[0][0].value
+    
+    # Get toxic count
+    toxic_query = messages_ref.where(filter=firestore.FieldFilter('is_toxic', '==', True)).count()
+    toxic_snapshot = toxic_query.get()
+    toxic_messages = toxic_snapshot[0][0].value
+    
+    return {
+        "total_messages": total_messages,
+        "toxic_messages": toxic_messages,
+        "toxicity_rate": (toxic_messages / total_messages * 100) if total_messages > 0 else 0
+    }

@@ -6,5 +6,6 @@ cachetools~=5.3
 tenacity~=8.2
 structlog~=24.1
 google-cloud-logging~=3.0
-flask==3.0.0
-gunicorn==21.2.0
+fastapi
+uvicorn[standard]
+python-multipart

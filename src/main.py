@@ -1,9 +1,14 @@
 import structlog
-from flask import Flask, jsonify
+import asyncio
+from typing import AsyncGenerator
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request, Response, status
+from fastapi.responses import JSONResponse
+from telegram import Update, BotCommand
 
 from src.config import config
 from src.database import db
-from src.telegram_bot import create_application
+from src.telegram_bot.bot import create_application
 
 # Configure structured logging
 structlog.configure(
@@ -16,48 +21,87 @@ structlog.configure(
 )
 logger = structlog.get_logger()
 
-app = Flask(__name__)
-
-# Initialize Telegram App (Global)
+# Global Bot Instance
 bot_app = create_application()
 
-@app.route("/health")
-def health():
-    """Health check endpoint for Cloud Run."""
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """
+    Lifespan events for the FastAPI application.
+    Handles Bot startup, webhook registration, and shutdown.
+    """
+    logger.info("Starting application lifespan...")
+    
+    if config.TELEGRAM_BOT_TOKEN and bot_app:
+        # 1. Initialize Bot
+        await bot_app.initialize()
+        await bot_app.start()
+        logger.info("Telegram Bot started")
+
+        # 2. Configure Webhook (if PUBLIC_URL set)
+        if config.PUBLIC_URL:
+            webhook_url = f"{config.PUBLIC_URL}/telegram"
+            logger.info("Configuring Telegram Webhook", url=webhook_url)
+            await bot_app.bot.set_webhook(url=webhook_url)
+            
+            # Configure Menu
+            commands = [
+                BotCommand("start", "Start the bot"),
+                BotCommand("help", "Get help"),
+                BotCommand("metrics", "View admin stats"),
+            ]
+            await bot_app.bot.set_my_commands(commands)
+            logger.info("Bot commands menu configured")
+
+    yield
+
+    # Shutdown
+    logger.info("Shutting down application...")
+    if bot_app:
+        await bot_app.stop()
+        await bot_app.shutdown()
+    logger.info("Shutdown complete")
+
+app = FastAPI(lifespan=lifespan)
+
+@app.get("/health")
+async def health():
+    """Health check endpoint."""
     db_status = "connected" if db is not None else "failed"
     bot_status = "configured" if bot_app else "disabled"
-    return jsonify({
+    return {
         "status": "ok", 
-        "version": "0.1.0", 
+        "version": "0.4.0-fastapi", 
         "database": db_status,
         "telegram_bot": bot_status
-    })
+    }
 
-@app.route("/")
-def index():
+@app.get("/")
+async def index():
     """Root endpoint."""
-    return jsonify({"service": "chatbot-moderation", "status": "running"})
+    return {"service": "chatbot-moderation", "status": "running"}
 
-@app.route("/telegram", methods=["POST"])
-async def telegram_webhook():
+@app.post("/telegram")
+async def telegram_webhook(request: Request):
     """Handle incoming Telegram updates via Webhook."""
     if not bot_app:
-        return jsonify({"error": "Bot not configured"}), 503
+        return JSONResponse(
+            content={"error": "Bot not configured"}, 
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+    
+    data = await request.json()
     
     # Process update
-    # In a real async flask app (Quart) this is easier. 
-    # For now we just acknowledge. PTB usually handles this better.
-    # This is a placeholder for the Webhook logic.
-    return jsonify({"status": "received"})
-
+    # In FastAPI/Uvicorn, we are on the main event loop, so this is safe.
+    # No need for new contexts per request.
+    update = Update.de_json(data, bot_app.bot)
+    await bot_app.process_update(update)
+    
+    return {"status": "ok"}
+    
 if __name__ == "__main__":
-    logger.info("Starting application...", port=config.PORT, debug=config.DEBUG)
-    
-    # In local dev (if not using docker-compose with hot reload which uses watchmedo)
-    # The docker-compose command is: watchmedo ... python src/main.py
-    
-    # If you want to run Polling locally, you'd typically do it here if TELEGRAM_BOT_TOKEN is present.
-    # But since we are behind Flask, handling polling + flask synchronously is hard.
-    # For this POC, we will just run Flask. User can run bot via separate command or we rely on webhooks later.
-    
-    app.run(host="0.0.0.0", port=config.PORT, debug=config.DEBUG)
+    import uvicorn
+    # Local dev entry point (python src/main.py)
+    # Note: docker-compose uses its own command, this is just for manual run
+    uvicorn.run(app, host="0.0.0.0", port=config.PORT)

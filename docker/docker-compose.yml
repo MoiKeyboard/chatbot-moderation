@@ -11,15 +11,15 @@ services:
     environment:
       - FIRESTORE_EMULATOR_HOST=firestore:8080
       - PYTHONUNBUFFERED=1
-
     ports:
       - "8080:8080"
     depends_on:
       - firestore
-    command: [ "watchmedo", "auto-restart", "--directory=./src", "--pattern=*.py", "--recursive", "--", "python", "src/main.py" ]
+    # Run the Web Server (Flask)
+    command: [ "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080", "--reload", "--reload-dir", "src" ]
 
   firestore:
     image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
     command: gcloud beta emulators firestore start --host-port=0.0.0.0:8080
     ports:
-      - "8081:8080" # Exposed on 8081 to host to avoid conflict if needed, internal is 8080
+      - "8081:8080"

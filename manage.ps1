@@ -8,6 +8,7 @@ function Show-Usage {
     Write-Host "  format        Format code (ruff format)"
     Write-Host "  shell         Open shell in app container"
     Write-Host "  build         Build production container"
+    Write-Host "  expose        Start ngrok tunnel on port 8080"
 }
 
 if ($args.Count -eq 0) {
@@ -39,6 +40,14 @@ switch ($Command) {
     }
     "build" {
         docker build -t chatbot-moderation -f docker/Dockerfile.prod .
+    }
+    "expose" {
+        Write-Host "Starting ngrok on port 8080 with static domain..."
+        if (Get-Command "ngrok" -ErrorAction SilentlyContinue) {
+            ngrok http --domain=brandee-avirulent-nonretroactively.ngrok-free.dev 8080
+        } else {
+            Write-Error "ngrok not found in PATH."
+        }
     }
     Default {
         Write-Error "Unknown command: $Command"
