@@ -12,7 +12,15 @@ A Dockerized Telegram/WhatsApp group moderation bot that uses simple keyword det
 ### Setup
 
 1.  **Clone the repository**.
-2.  **Environment Setup**:
+2.  **Telegram Configuration (Critical)**:
+    *   Open [@BotFather](https://t.me/BotFather) on Telegram.
+    *   Send `/mybots` -> Select Bot -> **Bot Settings** -> **Group Privacy**.
+    *   Click **Turn OFF**. (Required for the bot to see user messages).
+    *   **Promote to Admin**: The bot MUST be an Administrator with "Ban Users" permission.
+    *   **Convert to Supergroup**: "Mute" functionality only works in Supergroups.
+        *   *Tip*: Change "Chat History" to **Visible** in Group Settings to auto-upgrade to a Supergroup.
+
+3.  **Environment Setup**:
     Copy the example environment file:
     ```powershell
     cp .env.example .env

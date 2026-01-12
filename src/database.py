@@ -101,15 +101,8 @@ async def increment_warning(user_id: int):
         return
 
     doc_ref = db.collection('users').document(str(user_id))
-    # In a real app, use a transaction here. simpler for POC.
-    doc = doc_ref.get()
-    if doc.exists:
-        current_data = doc.to_dict()
-        new_count = current_data.get('warning_count', 0) + 1
-        doc_ref.update({'warning_count': new_count})
-    else:
-        # Create user if not exists (simplified)
-        pass 
+    # Optimized: Atomic Increment (No Read required)
+    doc_ref.set({"warning_count": firestore.Increment(1)}, merge=True) 
 
 async def log_message(message: MessageLog):
     """Log a message to Firestore."""
@@ -149,3 +142,14 @@ async def get_global_metrics():
         "toxic_messages": toxic_messages,
         "toxicity_rate": (toxic_messages / total_messages * 100) if total_messages > 0 else 0
     }
+
+async def get_top_offenders(limit: int = 5) -> list:
+    """Get list of users with highest warning counts."""
+    if not db:
+        return []
+    
+    users_ref = db.collection('users')
+    query = users_ref.order_by('warning_count', direction=firestore.Query.DESCENDING).limit(limit)
+    docs = query.stream()
+    
+    return [User(**doc.to_dict()) for doc in docs]

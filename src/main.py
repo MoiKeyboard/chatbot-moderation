@@ -47,7 +47,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             commands = [
                 BotCommand("start", "Start the bot"),
                 BotCommand("help", "Get help"),
-                BotCommand("metrics", "View admin stats"),
+                BotCommand("metrics", "View stats (Admin)"),
+                BotCommand("warnings", "View offenders (Admin)"),
+                BotCommand("restrict", "Mute user (min) (Admin)"),
             ]
             await bot_app.bot.set_my_commands(commands)
             logger.info("Bot commands menu configured")
