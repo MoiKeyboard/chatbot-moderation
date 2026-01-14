@@ -22,7 +22,7 @@ shell:
 	$(DC) run --rm app /bin/bash
 
 build:
-	docker build -t chatbot-moderation -f docker/Dockerfile.prod .
+	docker build -t chatbot-moderation -f docker/Dockerfile --target prod .
 
 expose:
 	ngrok http --domain=brandee-avirulent-nonretroactively.ngrok-free.dev 8080

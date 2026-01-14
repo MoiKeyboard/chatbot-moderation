@@ -39,7 +39,7 @@ switch ($Command) {
         docker-compose -f docker/docker-compose.yml -p chatbot-moderation run --rm app /bin/bash
     }
     "build" {
-        docker build -t chatbot-moderation -f docker/Dockerfile.prod .
+        docker build -t chatbot-moderation -f docker/Dockerfile --target prod .
     }
     "expose" {
         Write-Host "Starting ngrok on port 8080 with static domain..."

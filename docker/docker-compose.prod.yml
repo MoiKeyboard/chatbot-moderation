@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: prod
+    restart: always
+    env_file:
+      - ../.env
+    environment:
+      # Ensure Emulator is disabled for Prod
+      - FIRESTORE_EMULATOR_HOST=
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8080:8080"
