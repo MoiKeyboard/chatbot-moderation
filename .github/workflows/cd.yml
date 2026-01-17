@@ -1,0 +1,77 @@
+name: CD
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'docker/**'
+      - 'requirements.txt'
+      - '.github/workflows/cd.yml'
+
+env:
+  REGISTRY: gcr.io
+  SERVICE_NAME: chatbot-moderation
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # Required for Workload Identity Federation
+
+    steps:
+    - uses: actions/checkout@v4
+
+    # 1. Authenticate to Google Cloud
+    - id: 'auth'
+      name: 'Authenticate to Google Cloud'
+      uses: 'google-github-actions/auth@v2'
+      with:
+        workload_identity_provider: '${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}'
+        service_account: '${{ secrets.GCP_SERVICE_ACCOUNT }}'
+
+    # 2. Login to Docker Registry
+    - name: 'Docker Login'
+      uses: 'docker/login-action@v3'
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: 'oauth2accesstoken'
+        password: '${{ steps.auth.outputs.access_token }}'
+
+    # 3. Extract Metadata
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ secrets.GCP_PROJECT_ID }}/${{ env.SERVICE_NAME }}
+        tags: |
+          type=sha,format=long
+          type=raw,value=latest
+
+    # 4. Build and Push Container
+    - name: Build and Push
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: docker/Dockerfile
+        target: prod
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+
+    # 5. Deploy to Cloud Run
+    - name: Deploy to Cloud Run
+      uses: 'google-github-actions/deploy-cloudrun@v2'
+      with:
+        service: ${{ env.SERVICE_NAME }}
+        image: ${{ env.REGISTRY }}/${{ secrets.GCP_PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
+        region: ${{ secrets.GCP_REGION }}
+        flags: '--allow-unauthenticated' # Required for Telegram Webhook
+        env_vars: |
+          TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ADMIN_TELEGRAM_ID=${{ secrets.ADMIN_TELEGRAM_ID }}
+          GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
+          HUGGINGFACE_API_TOKEN=${{ secrets.HUGGINGFACE_API_TOKEN }}
+          LOG_LEVEL=INFO
+          FIRESTORE_EMULATOR_HOST=
