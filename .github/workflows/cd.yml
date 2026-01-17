@@ -10,8 +10,9 @@ on:
       - '.github/workflows/cd.yml'
 
 env:
-  REGISTRY: gcr.io
+  REGISTRY: eu.gcr.io # Amsterdam (Europe)
   SERVICE_NAME: chatbot-moderation
+  REGION: europe-west4 # Amsterdam
 
 jobs:
   deploy:
@@ -27,9 +28,8 @@ jobs:
     - name: Setup Config
       id: config
       run: |
-        # Strip whitespace from secret
-        PID=$(echo "${{ secrets.GCP_PROJECT_ID }}" | xargs)
-        echo "PROJECT_ID=$PID" >> $GITHUB_ENV
+        # Use Repository Variable for Project ID
+        echo "PROJECT_ID=${{ vars.GCP_PROJECT_ID }}" >> $GITHUB_ENV
 
     # 1. Authenticate to Google Cloud
     - id: 'auth'
@@ -75,8 +75,8 @@ jobs:
       with:
         service: ${{ env.SERVICE_NAME }}
         image: ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
-        region: ${{ secrets.GCP_REGION }}
-        flags: '--allow-unauthenticated' # Required for Telegram Webhook
+        region: ${{ env.REGION }}
+        flags: '--allow-unauthenticated'
         env_vars: |
           TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
           ADMIN_TELEGRAM_ID=${{ secrets.ADMIN_TELEGRAM_ID }}
