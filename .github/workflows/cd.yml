@@ -23,6 +23,14 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    # 0. Setup & Sanitize
+    - name: Setup Config
+      id: config
+      run: |
+        # Strip whitespace from secret
+        PID=$(echo "${{ secrets.GCP_PROJECT_ID }}" | xargs)
+        echo "PROJECT_ID=$PID" >> $GITHUB_ENV
+
     # 1. Authenticate to Google Cloud
     - id: 'auth'
       name: 'Authenticate to Google Cloud'
@@ -44,8 +52,11 @@ jobs:
     - name: Extract metadata
       id: meta
       uses: docker/metadata-action@v5
+      env:
+        # Sanitize Project ID (remove spaces)
+        PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
       with:
-        images: ${{ env.REGISTRY }}/${{ secrets.GCP_PROJECT_ID }}/${{ env.SERVICE_NAME }}
+        images: ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}
         tags: |
           type=sha,format=long
           type=raw,value=latest
