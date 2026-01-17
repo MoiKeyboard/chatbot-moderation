@@ -13,6 +13,7 @@ env:
   REGISTRY: eu.gcr.io # Amsterdam (Europe)
   SERVICE_NAME: chatbot-moderation
   REGION: europe-west4 # Amsterdam
+  PROJECT_ID: moikeyboard-chatbot # GCP Project ID
 
 jobs:
   deploy:
@@ -23,13 +24,6 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-
-    # 0. Setup & Sanitize
-    - name: Setup Config
-      id: config
-      run: |
-        # Use Repository Variable for Project ID
-        echo "PROJECT_ID=${{ vars.GCP_PROJECT_ID }}" >> $GITHUB_ENV
 
     # 1. Authenticate to Google Cloud
     - id: 'auth'
