@@ -49,7 +49,7 @@ jobs:
       with:
         images: ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}
         tags: |
-          type=sha,format=long
+          type=raw,value=${{ github.sha }}
           type=raw,value=latest
 
     # 4. Build and Push Container
