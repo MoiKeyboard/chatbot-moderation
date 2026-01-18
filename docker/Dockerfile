@@ -22,8 +22,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 FROM base AS builder
 
 COPY requirements.txt .
-# Install dependencies into the user directory to keep system clean and make copying easier
-RUN pip install --no-cache-dir --user -r requirements.txt
+# Create a virtual environment to isolate dependencies and make copying easier/safer
+RUN python -m venv /app/venv
+# Enable venv for the build steps
+ENV PATH="/app/venv/bin:$PATH"
+
+RUN pip install --no-cache-dir -r requirements.txt
 
 # ==========================================
 # 3. Development Stage
@@ -34,6 +38,7 @@ FROM base AS dev
 # Install ALL dependencies (Prod + Dev)
 COPY requirements.txt .
 COPY requirements-dev.txt .
+# Install globally in dev (simpler for devcontainers)
 RUN pip install --no-cache-dir -r requirements.txt -r requirements-dev.txt
 
 # Copy source (Note: Docker Compose volume will likely override this)
@@ -49,13 +54,14 @@ CMD ["python", "src/main.py"]
 # Extends base -> Minimal & Secure
 FROM base AS prod
 
-# Add user bin to PATH (to find the packages installed in builder)
-ENV PATH="/root/.local/bin:$PATH"
+# Copy the virtual environment from builder
+COPY --from=builder /app/venv /app/venv
 
-# Copy verified dependencies from builder stage
-COPY --from=builder /root/.local /root/.local
+# Enable venv for the runtime
+ENV PATH="/app/venv/bin:$PATH"
 
 # Setup non-root user for security
+# Ensure appuser owns /app (including the venv we just copied)
 RUN useradd -m appuser && chown -R appuser /app
 USER appuser
 
