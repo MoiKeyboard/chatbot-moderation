@@ -22,4 +22,13 @@ class Config:
     # AI / Phases 3
     HUGGINGFACE_API_TOKEN: str = os.getenv("HUGGINGFACE_API_TOKEN", "")
 
+    # Secret Token (Derived)
+    @property
+    def SECRET_TOKEN(self) -> str:
+        """Derive a consistent secret token from the bot token."""
+        import hashlib
+        if not self.TELEGRAM_BOT_TOKEN:
+            return "dev-token"
+        return hashlib.sha256(self.TELEGRAM_BOT_TOKEN.encode()).hexdigest()
+
 config = Config()

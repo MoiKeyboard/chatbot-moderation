@@ -41,7 +41,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         if config.PUBLIC_URL:
             webhook_url = f"{config.PUBLIC_URL}/telegram"
             logger.info("Configuring Telegram Webhook", url=webhook_url)
-            await bot_app.bot.set_webhook(url=webhook_url)
+            await bot_app.bot.set_webhook(
+                url=webhook_url, 
+                secret_token=config.SECRET_TOKEN
+            )
             
             # Configure Menu
             commands = [
@@ -85,6 +88,15 @@ async def index():
 @app.post("/telegram")
 async def telegram_webhook(request: Request):
     """Handle incoming Telegram updates via Webhook."""
+    # SECURITY: Verify Secret Token
+    secret_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
+    if secret_token != config.SECRET_TOKEN:
+        logger.warning("Unauthorized webhook access attempt", token_received=secret_token)
+        return JSONResponse(
+            content={"error": "Unauthorized"}, 
+            status_code=status.HTTP_401_UNAUTHORIZED
+        )
+
     if not bot_app:
         return JSONResponse(
             content={"error": "Bot not configured"}, 
