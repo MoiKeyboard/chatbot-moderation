@@ -78,5 +78,6 @@ jobs:
           GCP_PROJECT_ID=${{ env.PROJECT_ID }}
           FIRESTORE_DB_NAME=${{ env.FIRESTORE_DB_NAME }}
           HUGGINGFACE_API_TOKEN=${{ secrets.HUGGINGFACE_API_TOKEN }}
+          PUBLIC_URL=${{ vars.GCP_PUBLIC_URL }}
           LOG_LEVEL=INFO
           FIRESTORE_EMULATOR_HOST=
