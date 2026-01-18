@@ -10,6 +10,14 @@ class User(BaseModel):
     warning_count: int = 0
     created_at: datetime = datetime.now()
 
+class Chat(BaseModel):
+    chat_id: int
+    title: str
+    type: str # private, group, supergroup, channel
+    added_by: int
+    active: bool = True
+    joined_at: datetime = datetime.now()
+
 class MessageLog(BaseModel):
     message_id: int
     chat_id: int

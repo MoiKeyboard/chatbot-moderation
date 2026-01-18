@@ -1,7 +1,7 @@
 import firebase_admin # type: ignore
 from firebase_admin import credentials, firestore
 from src.config import config
-from src.models import User, MessageLog
+from src.models import User, MessageLog, Chat
 import structlog
 from typing import Optional
 
@@ -139,3 +139,20 @@ async def get_top_offenders(limit: int = 5) -> list:
     docs = query.stream()
     
     return [User(**doc.to_dict()) for doc in docs]
+
+async def add_chat(chat: Chat):
+    """Register a new chat in Firestore."""
+    if not db:
+        return
+        
+    doc_ref = db.collection('chats').document(str(chat.chat_id))
+    doc_ref.set(chat.dict(), merge=True)
+    
+async def remove_chat(chat_id: int):
+    """Mark a chat as inactive."""
+    if not db:
+        return
+
+    doc_ref = db.collection('chats').document(str(chat_id))
+    # We don't delete data, just mark active=False
+    doc_ref.update({"active": False})

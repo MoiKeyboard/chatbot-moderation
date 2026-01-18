@@ -1,10 +1,12 @@
 from typing import Optional
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram import Update, ChatMember, ChatMemberUpdated
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, ChatMemberHandler, filters
 from src.config import config
 from src.moderation.service import process_message
 from src.admin.handlers import handle_metrics_command, handle_warnings_command, check_admin
 from src.moderation.service import ACTIVE_MODEL, restrict_user
+from src.database import add_chat, remove_chat
+from src.models import Chat
 import structlog
 
 logger = structlog.get_logger()
@@ -96,6 +98,72 @@ async def restrict_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     except Exception as e:
         await update.message.reply_text(f"⚠️ Error: {str(e)}")
 
+async def track_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Tracks addition/removal of the bot from groups.
+    SECURITY: Only allow ADMIN_TELEGRAM_ID to add the bot.
+    """
+    result = extract_status_change(update.my_chat_member)
+    if result is None:
+        return
+
+    was_member, is_member = result
+    
+    # CASE 1: Bot Added to Group
+    if not was_member and is_member:
+        user = update.my_chat_member.from_user
+        chat = update.effective_chat
+        
+        logger.info("Bot added to chat", chat_id=chat.id, title=chat.title, by_user_id=user.id)
+        
+        # SECURITY CHECK
+        # If the user adding us is NOT the Admin, leave immediately.
+        if str(user.id) != config.ADMIN_TELEGRAM_ID:
+            logger.warning("Unauthorized addition blocked", chat_id=chat.id, by_user_id=user.id)
+            await context.bot.send_message(chat.id, "⛔ Authorization Failed. Adding this bot is restricted to the Administrator.")
+            await context.bot.leave_chat(chat.id)
+            return
+            
+        await context.bot.send_message(chat.id, "🛡 Moderation Bot Active. Hello Admin!")
+        
+        # PERSISTENCE: Save new chat to DB
+        new_chat = Chat(
+            chat_id=chat.id,
+            title=chat.title or "Unknown",
+            type=chat.type,
+            added_by=user.id
+        )
+        await add_chat(new_chat)
+        
+    # CASE 2: Bot Removed from Group
+    elif was_member and not is_member:
+        chat = update.effective_chat
+        logger.info("Bot removed from chat", chat_id=chat.id, title=chat.title)
+        
+        # PERSISTENCE: Mark chat as inactive
+        await remove_chat(chat.id)
+
+def extract_status_change(chat_member_update: ChatMemberUpdated) -> Optional[tuple[bool, bool]]:
+    """Helper to detect if bot was added or removed."""
+    status_change = chat_member_update.difference().get("status")
+    old_is_member, new_is_member = chat_member_update.difference().get("is_member", (None, None))
+
+    if status_change is None:
+        return None
+
+    old_status, new_status = status_change
+    was_member = old_status in [
+        ChatMember.MEMBER,
+        ChatMember.ADMINISTRATOR,
+    ] or (old_status == ChatMember.RESTRICTED and old_is_member is True)
+    
+    is_member = new_status in [
+        ChatMember.MEMBER,
+        ChatMember.ADMINISTRATOR,
+    ] or (new_status == ChatMember.RESTRICTED and new_is_member is True)
+
+    return was_member, is_member
+
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle incoming text messages."""
     if not update.message or not update.message.text:
@@ -135,5 +203,8 @@ def create_application() -> Optional[Application]:
     
     # Handle text messages
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
+    
+    # Handle Chat Membership (Security)
+    application.add_handler(ChatMemberHandler(track_chats, ChatMemberHandler.MY_CHAT_MEMBER))
 
     return application
