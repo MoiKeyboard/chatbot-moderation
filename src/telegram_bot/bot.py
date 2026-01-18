@@ -174,6 +174,10 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not user or not chat:
         return
 
+    # SECURITY: Ignore DMs from non-admins to prevent unauthorized AI usage costs
+    if chat.type == "private" and str(user.id) != config.ADMIN_TELEGRAM_ID:
+        return
+
     reply = await process_message(
         bot=context.bot,
         user_id=user.id,
