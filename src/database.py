@@ -66,7 +66,10 @@ def init_db():
                 'projectId': config.GCP_PROJECT_ID or "test-project",
             })
         
-        db = firestore.client()
+        if config.FIRESTORE_DB_NAME:
+            db = firestore.client(database=config.FIRESTORE_DB_NAME)
+        else:
+            db = firestore.client()
         logger.info("Firestore initialized", project_id=config.GCP_PROJECT_ID)
         return db
     except Exception as e:

@@ -16,6 +16,7 @@ class Config:
     
     # GCP
     GCP_PROJECT_ID: str = os.getenv("GCP_PROJECT_ID", "")
+    FIRESTORE_DB_NAME: str = os.getenv("FIRESTORE_DB_NAME", "")
     FIRESTORE_EMULATOR_HOST: str = os.getenv("FIRESTORE_EMULATOR_HOST", "")
     
     # AI / Phases 3
