@@ -12,6 +12,7 @@ def init_db():
     try:
         from google.cloud import firestore
         from google.auth.credentials import AnonymousCredentials
+        import os
 
         # Check if using emulator
         if config.FIRESTORE_EMULATOR_HOST:
@@ -21,6 +22,12 @@ def init_db():
              # The client automatically reads FIRESTORE_EMULATOR_HOST from env
         else:
              logger.info("Connecting to Real Firestore")
+             
+             # FIX: The Google SDK tries to connect to "" if this env var exists but is empty.
+             # We must remove it from the environment if it's empty to force Prod mode.
+             if "FIRESTORE_EMULATOR_HOST" in os.environ and not os.environ["FIRESTORE_EMULATOR_HOST"]:
+                 del os.environ["FIRESTORE_EMULATOR_HOST"]
+                 
              cred = None # Use Application Default Credentials
 
         # Connect to specific database if named, else default
