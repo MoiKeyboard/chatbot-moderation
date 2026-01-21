@@ -30,29 +30,36 @@ API_URL = f"https://router.huggingface.co/hf-inference/models/{ACTIVE_MODEL}"
 async def call_huggingface_api(text: str) -> dict:
     """Call Hugging Face Inference API with retry logic."""
     if not config.HUGGINGFACE_API_TOKEN:
+        logger.warning("Skipping AI check: No HUGGINGFACE_API_TOKEN set")
         return {"error": "No token"}
 
     headers = {"Authorization": f"Bearer {config.HUGGINGFACE_API_TOKEN}"}
     
     # Payload for Zero-Shot Classification (BART)
     # We must define the candidates
+    # 'threat' causes false positives on dates (e.g. "Feb 7th"). Switched to 'violence'.
     payload = {
         "inputs": text,
-        "parameters": {"candidate_labels": ["toxic", "safe", "insult", "threat"]}
+        "parameters": {"candidate_labels": ["toxic", "insult", "violence", "hate speech", "neutral", "safe"]}
     }
     
+    logger.info("Calling HF API", model=ACTIVE_MODEL)
+
     async with httpx.AsyncClient() as client:
         response = await client.post(API_URL, headers=headers, json=payload, timeout=5.0)
         
         # If the specific model is loading, it sends 503. Retry handled by tenacity.
         if response.status_code == 503:
+            logger.info("HF Model loading (503), retrying...")
             raise Exception("Model loading")
             
         if response.status_code != 200:
             logger.error("HF Inference Error", status=response.status_code, body=response.text)
             return {"error": "API failed"}
             
-        return response.json()
+        data = response.json()
+        logger.info("HF Response Received", data=data) 
+        return data
 
 async def analyze_toxicity(text: str) -> Tuple[bool, float, List[str]]:
     """
@@ -64,30 +71,44 @@ async def analyze_toxicity(text: str) -> Tuple[bool, float, List[str]]:
     if config.HUGGINGFACE_API_TOKEN:
         try:
             result = await call_huggingface_api(text)
-            logger.info("AI Raw Result", model=MODEL_FALLBACK, result=result) # DEBUG Log
             
-            if "error" not in result:
-                # Debug log confirmed format is List[Dict] or Dict with 'labels'
-                # Log: [{"label": "insult", "score": 0.81}, ...]
+            # Normalize API response to [(label, score), ...]
+            labels_and_scores = []
+            
+            # Handle List format (e.g. [{"label": "toxic", "score": 0.9}, ...])
+            # The API seems to return this format dynamically.
+            if isinstance(result, list):
+                # Handle possible nested list wrapper [[...]]
+                work_list = result[0] if (result and isinstance(result[0], list)) else result
                 
-                # Case A: List of Dicts (seen in logs)
-                if isinstance(result, list):
-                    # Sort by score desc just in case
-                    # result = [{'label': 'insult', 'score': 0.8}, ...]
-                    top_item = max(result, key=lambda x: x.get("score", 0))
-                    top_label = top_item.get("label")
-                    top_score = top_item.get("score")
-                    
-                    if top_label in ["toxic", "insult", "threat"] and top_score > 0.6:
-                         return True, top_score, [top_label]
+                for item in work_list:
+                    if isinstance(item, dict) and "label" in item and "score" in item:
+                        labels_and_scores.append((item["label"], item["score"]))
+                        
+            # Handle Dict format (e.g. {"labels": ["toxic"], "scores": [0.9]})
+            elif isinstance(result, dict) and "labels" in result and "scores" in result:
+                labels_and_scores = zip(result["labels"], result["scores"])
 
-                # Case B: Standard Zero-Shot Dict (safety fallback)
-                elif isinstance(result, dict) and "labels" in result:
-                    top_label = result["labels"][0]
-                    top_score = result["scores"][0]
-                    
-                    if top_label in ["toxic", "insult", "threat"] and top_score > 0.6:
-                         return True, top_score, [top_label]
+            if labels_and_scores:
+                # Cumulative Scoring: Sum probabilities of "bad" labels.
+                # This fixes "Split Vote" issues where toxic content is split across multiple labels.
+                bad_labels = {"toxic", "insult", "violence", "hate speech"}
+                current_score = 0.0
+                found_tags = []
+                
+                for label, score in labels_and_scores:
+                    if label in bad_labels:
+                        # NOISE FILTER: Only count scores > 0.1
+                        # This prevents "0.65 Threat + 0.05 Insult" from triggering the 0.7 threshold.
+                        if score > 0.1:
+                            current_score += score
+                            found_tags.append(f"{label} ({score:.2f})")
+                
+                logger.info("AI Analysis", total_score=current_score, breakdown=found_tags, original_text=text[:50])
+
+                # Threshold: 0.7 to avoid noise accumulation from "neutral" gibberish.
+                if current_score >= 0.7:
+                     return True, current_score, found_tags
 
         except Exception as e:
             logger.error("AI Analysis Failed", error=str(e))
