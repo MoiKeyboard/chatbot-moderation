@@ -4,6 +4,8 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
       target: dev
+      args:
+        HF_TOKEN: ${HUGGINGFACE_API_TOKEN}
     volumes:
       - ../src:/app/src
       - ../tests:/app/tests

@@ -1,0 +1,43 @@
+# Dockerfile.ai
+# Heavy container for Vertex AI Model Serving
+
+FROM python:3.14-slim
+
+WORKDIR /app
+
+# Set env vars to prevent pyc files
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Install System Deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install AI Libraries
+# We install CPU versions of torch to keep checking reasonable, 
+# but for production Vertex with GPU, you might want a different base image (e.g. nvcr.io/nvidia/pytorch)
+# google-cloud-aiplatform[prediction] includes the server components if using their pre-built wrappers, 
+# but here we use our own FastAPI.
+RUN pip install --no-cache-dir \
+    torch \
+    transformers \
+    sentence-transformers \
+    fastapi \
+    uvicorn \
+    uvloop \
+    httpx \
+    huggingface_hub
+
+# Copy source code
+# We copy the specific service folder
+COPY src/ai_service/ /app/src/ai_service/
+
+# Expose port (Vertex usually uses 8080)
+EXPOSE 8080
+
+# Environment variables
+ENV PORT=8080
+
+# Start the server using the python module path
+CMD ["uvicorn", "src.ai_service.main:app", "--host", "0.0.0.0", "--port", "8080"]

@@ -16,15 +16,155 @@ logger = structlog.get_logger()
 # Basic "dumb" list for Fallback
 TOXIC_KEYWORDS = {"badword", "stupid", "idiot", "hate", "scam"} 
 
-# AI Model Configuration
-# Primary: Custom Singlish Model
-# Fallback: Zero-Shot Standard Model
-# MODEL_PRIMARY = "govtech/lionguard-2" # TODO: Enable when we have a dedicated endpoint
-MODEL_FALLBACK = "facebook/bart-large-mnli"
+# Fallback / Remote Model
+MODEL_REMOTE = "facebook/bart-large-mnli"
 
-# Use Fallback for POC stability (LionGuard-2 returns 404 on free tier)
-ACTIVE_MODEL = MODEL_FALLBACK
-API_URL = f"https://router.huggingface.co/hf-inference/models/{ACTIVE_MODEL}"
+# Vertex AI Configuration
+# The endpoint should be a deployed LionGuard-2 model in Vertex AI Model Garden
+ACTIVE_MODEL = "Google Vertex AI (LionGuard-2)" if config.AI_PROVIDER == "vertex" else f"{MODEL_REMOTE} (Remote)"
+
+async def call_vertex_ai(text: str) -> List[dict]:
+    """
+    Call Google Cloud Vertex AI Endpoint.
+    """
+    if not config.VERTEX_ENDPOINT_ID:
+        logger.warning("Skipping Vertex AI: No VERTEX_ENDPOINT_ID set")
+        return []
+
+    try:
+        from google.cloud import aiplatform
+        
+        logger.info("Calling Vertex AI", endpoint_id=config.VERTEX_ENDPOINT_ID)
+
+        # Initialize Vertex AI
+        aiplatform.init(project=config.VERTEX_PROJECT_ID, location=config.VERTEX_LOCATION)
+        endpoint = aiplatform.Endpoint(config.VERTEX_ENDPOINT_ID)
+
+        # Predict
+        # LionGuard-2 on Vertex usually expects: {"instances": [{"text": "message"}]}
+        instances = [{"text": text}]
+        prediction = await asyncio.to_thread(endpoint.predict, instances=instances)
+        
+        # Parse Response
+        # Expected format depends on serving container. Assuming standard:
+        # predictions = [[{"label": "toxic", "score": 0.9}]]
+        logger.info("Vertex Response", predictions=prediction.predictions)
+        
+        results = []
+        if prediction.predictions:
+            # Flatten/Normalize
+            raw_result = prediction.predictions[0]
+            # Handle list of dicts (common serving format)
+            if isinstance(raw_result, list):
+                 for item in raw_result:
+                     results.append({"label": item.get("label"), "score": item.get("score")})
+            # Handle raw scores (if custom container) -> Map manually if needed
+            
+        return results
+
+    except Exception as e:
+        logger.error("Vertex AI Call Failed", error=str(e))
+        return []
+
+class LionGuardClassifier:
+    """
+    Custom wrapper for LionGuard-2-Lite.
+    Architecture: Text -> Embedding(Gemma) -> Vectors -> Classifier(LionGuard) -> Scores
+    """
+    def __init__(self):
+        logger.info("Loading Local AI Chain...")
+        
+        # 0. Authenticate (for Gated Models)
+        if config.HUGGINGFACE_API_TOKEN:
+            import huggingface_hub
+            try:
+                huggingface_hub.login(token=config.HUGGINGFACE_API_TOKEN)
+                logger.info("Authenticated with Hugging Face")
+            except Exception as e:
+                logger.warning("Failed to authenticate with HF", error=str(e))
+
+        # 1. Load Embedding Model (SBERT)
+        logger.info("Loading Embedder", model=MODEL_EMBEDDING)
+        from sentence_transformers import SentenceTransformer
+        self.embedder = SentenceTransformer(MODEL_EMBEDDING, device="cpu")
+        
+        # 2. Load Classifier (Transformers)
+        logger.info("Loading Classifier", model=MODEL_CLASSIFIER)
+        from transformers import AutoModel
+        import torch
+        
+        self.classifier = AutoModel.from_pretrained(
+            MODEL_CLASSIFIER, 
+            trust_remote_code=True
+        ).to("cpu")
+        self.classifier.eval()
+        
+        # Labels mapping (from model config or known LionGuard labels)
+        # LionGuard-2-Lite usually outputs specific indices. 
+        # We assume standard LionGuard labels for now:
+        self.labels = ["unsafe", "safe"] # Basic binary or specific categories?
+        # NOTE: LionGuard-2-Lite typically outputs multi-class logits.
+        # We will inspect the output dynamically.
+        
+        logger.info("LionGuard Chain Loaded")
+
+    def predict(self, text: str) -> List[dict]:
+        """
+        Returns list of dicts: [{"label": "hate", "score": 0.9}, ...]
+        """
+        import torch
+        import numpy as np
+        
+        # 1. Embed
+        # LionGuard expects embeddings. SBERT returns numpy array.
+        embeddings = self.embedder.encode([text]) # Shape: (1, 768)
+        
+        # 2. Classify
+        with torch.no_grad():
+            inputs = torch.tensor(embeddings)
+            outputs = self.classifier(inputs)
+            # Logits shape: (1, NumLabels)
+            if hasattr(outputs, "logits"):
+                logits = outputs.logits
+            elif isinstance(outputs, (list, tuple)):
+                logits = outputs[0]
+            else:
+                logits = outputs
+                
+            probs = torch.softmax(logits, dim=1).numpy()[0] # [0.1, 0.9, ...]
+            
+        # 3. Map to Labels
+        # If model config has id2label, use it.
+        id2label = self.classifier.config.id2label
+        
+        # Fix: Handle generic labels (LABEL_0, LABEL_1) or missing labels
+        # We assume binary classification for LionGuard: 0=Safe, 1=Unsafe (Toxic)
+        if not id2label or str(id2label.get(0, "")).upper() == "LABEL_0":
+             # lionguard-2-lite binary assumption
+             id2label = {0: "safe", 1: "toxic"}
+        
+        logger.info("Model Labels", id2label=id2label, raw_probs=probs.tolist())
+
+        results = []
+        
+        for idx, score in enumerate(probs):
+            label = id2label.get(idx, f"label_{idx}")
+            results.append({"label": label, "score": float(score)})
+            
+        return results
+
+def get_classifier():
+    """Load the local model on first use."""
+    global _LIONGUARD
+    if _LIONGUARD is None:
+        try:
+            _LIONGUARD = LionGuardClassifier()
+        except Exception as e:
+            logger.error("Failed to load Local AI", error=str(e))
+            raise e
+    return _LIONGUARD
+
+API_URL = f"https://router.huggingface.co/hf-inference/models/{MODEL_REMOTE}"
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10))
 async def call_huggingface_api(text: str) -> dict:
@@ -43,7 +183,7 @@ async def call_huggingface_api(text: str) -> dict:
         "parameters": {"candidate_labels": ["toxic", "insult", "violence", "hate speech", "neutral", "safe"]}
     }
     
-    logger.info("Calling HF API", model=ACTIVE_MODEL)
+    logger.info("Calling HF API (Remote)", model=MODEL_REMOTE)
 
     async with httpx.AsyncClient() as client:
         response = await client.post(API_URL, headers=headers, json=payload, timeout=5.0)
@@ -63,56 +203,80 @@ async def call_huggingface_api(text: str) -> dict:
 
 async def analyze_toxicity(text: str) -> Tuple[bool, float, List[str]]:
     """
-    Hybrid check: AI > Keyword Fallback.
+    Hybrid check: AI (Local/Remote) > Keyword Fallback.
     Returns: (is_toxic, score, found_keywords)
     """
     
     # 1. AI Check (Phase 3)
-    if config.HUGGINGFACE_API_TOKEN:
-        try:
-            result = await call_huggingface_api(text)
+    # Feature Toggle: Choose Provider
+    
+    try:
+        labels_and_scores = []
+        
+        if config.AI_PROVIDER == "vertex":
+             # --- VERTEX AI (Production) ---
+             raw_results = await call_vertex_ai(text)
+             for item in raw_results:
+                 labels_and_scores.append((item["label"], item["score"]))
+
+        elif config.AI_PROVIDER == "local":
+             # --- LOCAL INFERENCE (Legacy/Disabled) ---
+             logger.warning("Local AI provider is deprecated/disabled in this version.")
+             # Fallback to zero
+             
+        else:
+             # --- REMOTE INFERENCE (HuggingFace API Backup) ---
+             if config.HUGGINGFACE_API_TOKEN:
+                 result = await call_huggingface_api(text)
+                 
+                 # Normalize API response to [(label, score), ...]
+                 # Handle List format (e.g. [{"label": "toxic", "score": 0.9}, ...])
+                 if isinstance(result, list):
+                    work_list = result[0] if (result and isinstance(result[0], list)) else result
+                    for item in work_list:
+                        if isinstance(item, dict) and "label" in item and "score" in item:
+                            labels_and_scores.append((item["label"], item["score"]))
+                            
+                 # Handle Dict format
+                 elif isinstance(result, dict) and "labels" in result and "scores" in result:
+                    labels_and_scores = zip(result["labels"], result["scores"])
+
+        # 2. Score Calculation (Unified Logic)
+        if labels_and_scores:
+            # LionGuard Labels: "hate", "harassment", "violence", "sexual", "self-harm", "toxic", "insult"
+            # BART Labels: "toxic", "insult", "violence", "hate speech"
+            bad_labels = {"toxic", "insult", "violence", "hate speech", "hate", "harassment", "sexual", "self-harm"}
             
-            # Normalize API response to [(label, score), ...]
-            labels_and_scores = []
+            current_score = 0.0
+            found_tags = []
             
-            # Handle List format (e.g. [{"label": "toxic", "score": 0.9}, ...])
-            # The API seems to return this format dynamically.
-            if isinstance(result, list):
-                # Handle possible nested list wrapper [[...]]
-                work_list = result[0] if (result and isinstance(result[0], list)) else result
-                
-                for item in work_list:
-                    if isinstance(item, dict) and "label" in item and "score" in item:
-                        labels_and_scores.append((item["label"], item["score"]))
-                        
-            # Handle Dict format (e.g. {"labels": ["toxic"], "scores": [0.9]})
-            elif isinstance(result, dict) and "labels" in result and "scores" in result:
-                labels_and_scores = zip(result["labels"], result["scores"])
+            for label, score in labels_and_scores:
+                if label in bad_labels:
+                    # NOISE FILTER: Only count scores > 0.05
+                    if score > 0.05:
+                        current_score += score
+                        found_tags.append(f"{label} ({score:.2f})")
+            
+            provider_tag = config.AI_PROVIDER.capitalize()
+            logger.info(f"AI Analysis ({provider_tag})", total_score=current_score, breakdown=found_tags, original_text=text[:50])
 
-            if labels_and_scores:
-                # Cumulative Scoring: Sum probabilities of "bad" labels.
-                # This fixes "Split Vote" issues where toxic content is split across multiple labels.
-                bad_labels = {"toxic", "insult", "violence", "hate speech"}
-                current_score = 0.0
-                found_tags = []
-                
-                for label, score in labels_and_scores:
-                    if label in bad_labels:
-                        # NOISE FILTER: Only count scores > 0.1
-                        # This prevents "0.65 Threat + 0.05 Insult" from triggering the 0.7 threshold.
-                        if score > 0.1:
-                            current_score += score
-                            found_tags.append(f"{label} ({score:.2f})")
-                
-                logger.info("AI Analysis", total_score=current_score, breakdown=found_tags, original_text=text[:50])
+            # Threshold: 0.7 (Conservative)
+            # LionGuard is sharper, but 0.7 works well for cumulative scores.
+            if current_score >= 0.7:
+                 return True, current_score, found_tags
 
-                # Threshold: 0.7 to avoid noise accumulation from "neutral" gibberish.
-                if current_score >= 0.7:
-                     return True, current_score, found_tags
-
-        except Exception as e:
-            logger.error("AI Analysis Failed", error=str(e))
-            # Fall through to keyword check
+    except Exception as e:
+        logger.error("AI Analysis Failed", error=str(e))
+        # Fall through to keyword check
+    
+    # 2. Keyword Fallback (Phase 2)
+    text_lower = text.lower()
+    found = [word for word in TOXIC_KEYWORDS if word in text_lower]
+    
+    if found:
+        return True, 1.0, found
+        
+    return False, 0.0, []
     
     # 2. Keyword Fallback (Phase 2)
     text_lower = text.lower()

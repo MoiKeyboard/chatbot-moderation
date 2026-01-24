@@ -14,12 +14,20 @@ class Config:
     TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     ADMIN_TELEGRAM_ID: str = os.getenv("ADMIN_TELEGRAM_ID", "")
     
-    # GCP
     GCP_PROJECT_ID: str = os.getenv("GCP_PROJECT_ID", "")
     FIRESTORE_DB_NAME: str = os.getenv("FIRESTORE_DB_NAME", "")
     FIRESTORE_EMULATOR_HOST: str = os.getenv("FIRESTORE_EMULATOR_HOST", "")
     
-    # AI / Phases 3
+    # AI Configuration (Feature Toggle)
+    # Options: "vertex" (LionGuard-2 on GCP), "remote" (Hugging Face API Backup), "local" (Disabled/Legacy)
+    AI_PROVIDER: str = os.getenv("AI_PROVIDER", "vertex")
+    
+    # Vertex AI Configuration
+    VERTEX_PROJECT_ID: str = os.getenv("VERTEX_PROJECT_ID", GCP_PROJECT_ID)
+    VERTEX_LOCATION: str = os.getenv("VERTEX_LOCATION", "us-central1")
+    VERTEX_ENDPOINT_ID: str = os.getenv("VERTEX_ENDPOINT_ID", "")
+    
+    # Backup: Hugging Face API (for "remote" provider)
     HUGGINGFACE_API_TOKEN: str = os.getenv("HUGGINGFACE_API_TOKEN", "")
 
     # Secret Token (Derived)

@@ -11,13 +11,42 @@ on:
 
 env:
   REGISTRY: eu.gcr.io # Amsterdam (Europe)
-  SERVICE_NAME: chatbot-moderation
   REGION: europe-west4 # Amsterdam
   PROJECT_ID: moikeyboard-chatbot # GCP Project ID
   FIRESTORE_DB_NAME: chatbot-db # Firestore Database Name
+  SERVICE_NAME: chatbot-moderation # Default Service Name (App)
+  # App Configuration
+  AI_PROVIDER: remote
+  VERTEX_LOCATION: europe-west4
+  # Logging
+  LOG_LEVEL: INFO
 
 jobs:
-  deploy:
+  # Job 1: Filter Changes
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.filter.outputs.app }}
+      ai: ${{ steps.filter.outputs.ai }}
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dorny/paths-filter@v3
+      id: filter
+      with:
+        filters: |
+          app:
+            - 'src/**'
+            - '!src/ai_service/**'
+            - 'docker/Dockerfile'
+            - 'requirements.txt'
+          ai:
+            - 'src/ai_service/**'
+            - 'docker/Dockerfile.ai'
+
+  # Job 2: Deploy Chatbot (Lightweight)
+  deploy-app:
+    needs: changes
+    if: ${{ needs.changes.outputs.app == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -26,7 +55,6 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    # 1. Authenticate to Google Cloud
     - id: 'auth'
       name: 'Authenticate to Google Cloud'
       uses: 'google-github-actions/auth@v2'
@@ -35,7 +63,6 @@ jobs:
         service_account: '${{ secrets.GCP_SERVICE_ACCOUNT }}'
         token_format: 'access_token'
 
-    # 2. Login to Docker Registry
     - name: 'Docker Login'
       uses: 'docker/login-action@v3'
       with:
@@ -43,7 +70,6 @@ jobs:
         username: 'oauth2accesstoken'
         password: '${{ steps.auth.outputs.access_token }}'
 
-    # 3. Extract Metadata
     - name: Extract metadata
       id: meta
       uses: docker/metadata-action@v5
@@ -53,7 +79,6 @@ jobs:
           type=raw,value=${{ github.sha }}
           type=raw,value=latest
 
-    # 4. Build and Push Container
     - name: Build and Push
       uses: docker/build-push-action@v6
       with:
@@ -64,7 +89,6 @@ jobs:
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
 
-    # 5. Deploy to Cloud Run
     - name: Deploy to Cloud Run
       uses: 'google-github-actions/deploy-cloudrun@v2'
       with:
@@ -79,4 +103,59 @@ jobs:
           FIRESTORE_DB_NAME=${{ env.FIRESTORE_DB_NAME }}
           HUGGINGFACE_API_TOKEN=${{ secrets.HUGGINGFACE_API_TOKEN }}
           PUBLIC_URL=${{ vars.PUBLIC_URL }}
-          LOG_LEVEL=INFO
+          LOG_LEVEL=${{ env.LOG_LEVEL }}
+          AI_PROVIDER=${{ env.AI_PROVIDER }}
+          VERTEX_PROJECT_ID=${{ env.PROJECT_ID }}
+          VERTEX_LOCATION=${{ env.VERTEX_LOCATION }}
+          # Add VERTEX_ENDPOINT_ID here once you have it
+          # VERTEX_ENDPOINT_ID=... 
+
+  # Job 3: Deploy AI Service (Heavy)
+  deploy-ai:
+    needs: changes
+    if: ${{ needs.changes.outputs.ai == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      SERVICE_NAME: lionguard-service
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - id: 'auth'
+      name: 'Authenticate to Google Cloud'
+      uses: 'google-github-actions/auth@v2'
+      with:
+        workload_identity_provider: '${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}'
+        service_account: '${{ secrets.GCP_SERVICE_ACCOUNT }}'
+        token_format: 'access_token'
+
+    - name: 'Docker Login'
+      uses: 'docker/login-action@v3'
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: 'oauth2accesstoken'
+        password: '${{ steps.auth.outputs.access_token }}'
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}
+        tags: |
+          type=raw,value=${{ github.sha }}
+          type=raw,value=v1
+          type=raw,value=latest
+
+    - name: Build and Push
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: docker/Dockerfile.ai
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max

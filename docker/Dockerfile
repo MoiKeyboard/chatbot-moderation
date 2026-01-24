@@ -16,21 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ==========================================
-# 2. Builder Stage (Prod Dependency Setup)
-# ==========================================
-# We use this stage to build/install prod-only dependencies cleanly
-FROM base AS builder
-
-COPY requirements.txt .
-# Create a virtual environment to isolate dependencies and make copying easier/safer
-RUN python -m venv /app/venv
-# Enable venv for the build steps
-ENV PATH="/app/venv/bin:$PATH"
-
-RUN pip install --no-cache-dir -r requirements.txt
-
-# ==========================================
-# 3. Development Stage
+# 2. Development Stage
 # ==========================================
 # Extends base, adds dev tooling.
 FROM base AS dev
@@ -49,19 +35,16 @@ COPY tests/ tests/
 CMD ["python", "src/main.py"]
 
 # ==========================================
-# 4. Production Stage
+# 3. Production Stage
 # ==========================================
 # Extends base -> Minimal & Secure
 FROM base AS prod
 
-# Copy the virtual environment from builder
-COPY --from=builder /app/venv /app/venv
-
-# Enable venv for the runtime
-ENV PATH="/app/venv/bin:$PATH"
+COPY requirements.txt .
+# Install prod libs
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Setup non-root user for security
-# Ensure appuser owns /app (including the venv we just copied)
 RUN useradd -m appuser && chown -R appuser /app
 USER appuser
 
