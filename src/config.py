@@ -27,7 +27,7 @@ class Config:
     AI_SERVICE_URL: str = os.getenv("AI_SERVICE_URL", "") # Full URL to /predict
     
     # Legacy / Optional
-    VERTEX_PROJECT_ID: str = os.getenv("VERTEX_PROJECT_ID", GCP_PROJECT_ID)
+    VERTEX_PROJECT_ID: str = os.getenv("VERTEX_PROJECT_ID", os.getenv("GCP_PROJECT_ID", ""))
     VERTEX_LOCATION: str = os.getenv("VERTEX_LOCATION", "europe-west4")
     VERTEX_ENDPOINT_ID: str = os.getenv("VERTEX_ENDPOINT_ID", "")
     
