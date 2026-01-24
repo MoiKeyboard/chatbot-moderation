@@ -45,6 +45,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Setup non-root user for security
+# Ensure appuser owns /app (including the venv we just copied)
 RUN useradd -m appuser && chown -R appuser /app
 USER appuser
 
