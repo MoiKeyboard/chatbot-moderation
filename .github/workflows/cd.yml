@@ -51,11 +51,9 @@ jobs:
             - '!src/ai_service/**'
             - 'docker/Dockerfile'
             - 'requirements.txt'
-            - '! .github/workflows/cd.yml'
           ai:
             - 'src/ai_service/**'
             - 'docker/Dockerfile.ai'
-            - '! .github/workflows/cd.yml'
 
   # Job 2: Deploy Chatbot (Lightweight)
   deploy-app:
@@ -124,7 +122,7 @@ jobs:
           AI_PROVIDER=${{ env.AI_PROVIDER }}
           VERTEX_PROJECT_ID=${{ env.PROJECT_ID }}
           VERTEX_LOCATION=${{ env.VERTEX_LOCATION }}
-          AI_SERVICE_URL=${{ vars.AI_SERVICE_URL }} # Set this in GitHub Variables after first AI deploy 
+          AI_SERVICE_URL=${{ vars.AI_SERVICE_URL }} 
 
   # Job 3: Deploy AI Service (Heavy)
   deploy-ai:
