@@ -8,6 +8,18 @@ on:
       - 'docker/**'
       - 'requirements.txt'
       - '.github/workflows/cd.yml'
+  workflow_dispatch:
+    inputs:
+      force_app_deployment:
+        description: 'Force Chatbot App Deployment'
+        required: false
+        type: boolean
+        default: false
+      force_ai_deployment:
+        description: 'Force AI Service Deployment'
+        required: false
+        type: boolean
+        default: false
 
 env:
   REGISTRY: eu.gcr.io # Amsterdam (Europe)
@@ -46,7 +58,7 @@ jobs:
   # Job 2: Deploy Chatbot (Lightweight)
   deploy-app:
     needs: changes
-    if: ${{ needs.changes.outputs.app == 'true' }}
+    if: ${{ needs.changes.outputs.app == 'true' || inputs.force_app_deployment == true }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -116,7 +128,7 @@ jobs:
   # Job 3: Deploy AI Service (Heavy)
   deploy-ai:
     needs: changes
-    if: ${{ needs.changes.outputs.ai == 'true' }}
+    if: ${{ needs.changes.outputs.ai == 'true' || inputs.force_ai_deployment == true }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
