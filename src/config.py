@@ -19,12 +19,16 @@ class Config:
     FIRESTORE_EMULATOR_HOST: str = os.getenv("FIRESTORE_EMULATOR_HOST", "")
     
     # AI Configuration (Feature Toggle)
-    # Options: "vertex" (LionGuard-2 on GCP), "remote" (Hugging Face API Backup), "local" (Disabled/Legacy)
-    AI_PROVIDER: str = os.getenv("AI_PROVIDER", "vertex")
+    # AI Configuration (Feature Toggle)
+    # Options: "cloudrun" (LionGuard on Cloud Run), "remote" (Hugging Face API Backup), "local" (Disabled)
+    AI_PROVIDER: str = os.getenv("AI_PROVIDER", "cloudrun") 
     
-    # Vertex AI Configuration
+    # Cloud Run / Remote Service Configuration
+    AI_SERVICE_URL: str = os.getenv("AI_SERVICE_URL", "") # Full URL to /predict
+    
+    # Legacy / Optional
     VERTEX_PROJECT_ID: str = os.getenv("VERTEX_PROJECT_ID", GCP_PROJECT_ID)
-    VERTEX_LOCATION: str = os.getenv("VERTEX_LOCATION", "us-central1")
+    VERTEX_LOCATION: str = os.getenv("VERTEX_LOCATION", "europe-west4")
     VERTEX_ENDPOINT_ID: str = os.getenv("VERTEX_ENDPOINT_ID", "")
     
     # Backup: Hugging Face API (for "remote" provider)

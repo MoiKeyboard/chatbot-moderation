@@ -23,47 +23,46 @@ MODEL_REMOTE = "facebook/bart-large-mnli"
 # The endpoint should be a deployed LionGuard-2 model in Vertex AI Model Garden
 ACTIVE_MODEL = "Google Vertex AI (LionGuard-2)" if config.AI_PROVIDER == "vertex" else f"{MODEL_REMOTE} (Remote)"
 
-async def call_vertex_ai(text: str) -> List[dict]:
+async def call_cloud_run(text: str) -> List[dict]:
     """
-    Call Google Cloud Vertex AI Endpoint.
+    Call Cloud Run (or any HTTP Model Service).
     """
-    if not config.VERTEX_ENDPOINT_ID:
-        logger.warning("Skipping Vertex AI: No VERTEX_ENDPOINT_ID set")
+    if not config.AI_SERVICE_URL:
+        logger.warning("Skipping Cloud Run: No AI_SERVICE_URL set")
         return []
 
     try:
-        from google.cloud import aiplatform
+        logger.info("Calling Cloud Run", url=config.AI_SERVICE_URL)
         
-        logger.info("Calling Vertex AI", endpoint_id=config.VERTEX_ENDPOINT_ID)
-
-        # Initialize Vertex AI
-        aiplatform.init(project=config.VERTEX_PROJECT_ID, location=config.VERTEX_LOCATION)
-        endpoint = aiplatform.Endpoint(config.VERTEX_ENDPOINT_ID)
-
-        # Predict
-        # LionGuard-2 on Vertex usually expects: {"instances": [{"text": "message"}]}
-        instances = [{"text": text}]
-        prediction = await asyncio.to_thread(endpoint.predict, instances=instances)
+        # Standard format for our container: {"instances": [{"text": "message"}]}
+        payload = {"instances": [{"text": text}]}
         
+        async with httpx.AsyncClient() as client:
+            response = await client.post(config.AI_SERVICE_URL, json=payload, timeout=10.0)
+            
+            if response.status_code != 200:
+                logger.error("Cloud Run Failed", status=response.status_code, body=response.text)
+                return []
+                
+            prediction = response.json()
+            
         # Parse Response
-        # Expected format depends on serving container. Assuming standard:
-        # predictions = [[{"label": "toxic", "score": 0.9}]]
-        logger.info("Vertex Response", predictions=prediction.predictions)
+        # Expected: {"predictions": [[{"label": "toxic", "score": 0.9}]]}
+        logger.info("Cloud Run Response", predictions=prediction.get("predictions"))
         
         results = []
-        if prediction.predictions:
+        preds = prediction.get("predictions", [])
+        if preds:
             # Flatten/Normalize
-            raw_result = prediction.predictions[0]
-            # Handle list of dicts (common serving format)
+            raw_result = preds[0]
             if isinstance(raw_result, list):
-                 for item in raw_result:
-                     results.append({"label": item.get("label"), "score": item.get("score")})
-            # Handle raw scores (if custom container) -> Map manually if needed
+                    for item in raw_result:
+                        results.append({"label": item.get("label"), "score": item.get("score")})
             
         return results
 
     except Exception as e:
-        logger.error("Vertex AI Call Failed", error=str(e))
+        logger.error("Cloud Run Call Failed", error=str(e))
         return []
 
 class LionGuardClassifier:
@@ -213,9 +212,14 @@ async def analyze_toxicity(text: str) -> Tuple[bool, float, List[str]]:
     try:
         labels_and_scores = []
         
-        if config.AI_PROVIDER == "vertex":
-             # --- VERTEX AI (Production) ---
-             raw_results = await call_vertex_ai(text)
+# Cloud Run / HTTP Configuration
+ACTIVE_MODEL = "LionGuard-2 (Cloud Run)" if config.AI_PROVIDER == "cloudrun" else f"{MODEL_REMOTE} (Remote)"
+
+# ... (omitted code) ...
+
+        if config.AI_PROVIDER == "cloudrun" or config.AI_PROVIDER == "vertex": # Keep vertex for backward compat if needed
+             # --- CLOUD RUN (Production) ---
+             raw_results = await call_cloud_run(text)
              for item in raw_results:
                  labels_and_scores.append((item["label"], item["score"]))
 

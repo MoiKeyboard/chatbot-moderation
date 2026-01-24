@@ -51,9 +51,11 @@ jobs:
             - '!src/ai_service/**'
             - 'docker/Dockerfile'
             - 'requirements.txt'
+            - '! .github/workflows/cd.yml'
           ai:
             - 'src/ai_service/**'
             - 'docker/Dockerfile.ai'
+            - '! .github/workflows/cd.yml'
 
   # Job 2: Deploy Chatbot (Lightweight)
   deploy-app:
@@ -122,8 +124,7 @@ jobs:
           AI_PROVIDER=${{ env.AI_PROVIDER }}
           VERTEX_PROJECT_ID=${{ env.PROJECT_ID }}
           VERTEX_LOCATION=${{ env.VERTEX_LOCATION }}
-          # Add VERTEX_ENDPOINT_ID here once you have it
-          # VERTEX_ENDPOINT_ID=... 
+          AI_SERVICE_URL=${{ vars.AI_SERVICE_URL }} # Set this in GitHub Variables after first AI deploy 
 
   # Job 3: Deploy AI Service (Heavy)
   deploy-ai:
@@ -177,3 +178,13 @@ jobs:
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
+
+    - name: Deploy to Cloud Run
+      uses: 'google-github-actions/deploy-cloudrun@v2'
+      with:
+        service: ${{ env.SERVICE_NAME }}
+        image: ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
+        region: ${{ env.REGION }}
+        flags: '--allow-unauthenticated --memory=4Gi --cpu=2'
+        env_vars: |
+          HF_TOKEN=${{ secrets.HUGGINGFACE_API_TOKEN }}
