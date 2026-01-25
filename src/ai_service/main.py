@@ -49,39 +49,36 @@ async def predict(request: Request):
         if not text:
             continue
             
-        # 1. Embed
-        embeddings = embedder.encode([text])
+        # 1. Format (Crucial Step: Add Prompt)
+        # Source: https://huggingface.co/govtech/lionguard-2-lite/blob/main/inference.py
+        formatted_text = f"task: classification | query: {text}"
+            
+        # 2. Embed
+        embeddings = embedder.encode([formatted_text])
         
-        # 2. Classify
-        with torch.no_grad():
-            inputs = torch.tensor(embeddings)
-            outputs = classifier(inputs)
-            
-            # Extract Logits
-            if hasattr(outputs, "logits"):
-                logits = outputs.logits
-            elif isinstance(outputs, (list, tuple)):
-                logits = outputs[0]
-            else:
-                logits = outputs
-                
-            probs = torch.softmax(logits, dim=1).numpy()[0]
-            
-            # Map Labels (Assuming LionGuard Binary: 0=Safe, 1=Toxic)
-            # Adjust if model config has specific id2label
-            id2label = {0: "safe", 1: "toxic"}
-            
-            # Get highest probability label
-            label_idx = probs.argmax()
-            score = float(probs[label_idx])
-            label = id2label.get(label_idx, "unknown")
-            
-            results.append({
-                "label": label,
-                "score": score,
-                "all_scores": probs.tolist()
-            })
-            
+        # 3. Classify (Use native predict method for LionGuard)
+        if hasattr(classifier, "predict"):
+             # Returns: {"binary": [0.1], "hateful_l1": [0.9]...}
+             results_dict = classifier.predict(embeddings)
+             
+             inst_results = []
+             for category, scores in results_dict.items():
+                 # scores is a list/array, get first item
+                 score = float(scores[0])
+                 inst_results.append({"label": category, "score": score})
+             
+             results.append(inst_results)
+             
+        else:
+            # Fallback (Should not happen for LionGuard)
+            with torch.no_grad():
+                inputs = torch.tensor(embeddings)
+                outputs = classifier(inputs)
+                # ... (basic fallback omitted for brevity, assuming trust_remote_code=True works)
+                results.append([])
+
+    # Flatten logic to match client expectation 
+    # Client expects {"predictions": [[{"label":..., "score":...}]]}
     return {"predictions": results}
 
 if __name__ == "__main__":

@@ -19,9 +19,9 @@ TOXIC_KEYWORDS = {"badword", "stupid", "idiot", "hate", "scam"}
 # Fallback / Remote Model
 MODEL_REMOTE = "facebook/bart-large-mnli"
 
-# Vertex AI Configuration
-# The endpoint should be a deployed LionGuard-2 model in Vertex AI Model Garden
-ACTIVE_MODEL = "Google Vertex AI (LionGuard-2)" if config.AI_PROVIDER == "vertex" else f"{MODEL_REMOTE} (Remote)"
+# External AI Endpoint Configuration
+# The endpoint should be a deployed LionGuard-2 model in any Vertex AI Model Garden or Cloud Run
+ACTIVE_MODEL = "LionGuard-2 (Cloud Run)" if config.AI_PROVIDER in ["cloudrun", "vertex"] else f"{MODEL_REMOTE} (Remote)"
 
 async def call_cloud_run(text: str) -> List[dict]:
     """
@@ -38,7 +38,7 @@ async def call_cloud_run(text: str) -> List[dict]:
         payload = {"instances": [{"text": text}]}
         
         async with httpx.AsyncClient() as client:
-            response = await client.post(config.AI_SERVICE_URL, json=payload, timeout=10.0)
+            response = await client.post(config.AI_SERVICE_URL, json=payload, timeout=60.0)
             
             if response.status_code != 200:
                 logger.error("Cloud Run Failed", status=response.status_code, body=response.text)
@@ -58,6 +58,9 @@ async def call_cloud_run(text: str) -> List[dict]:
             if isinstance(raw_result, list):
                     for item in raw_result:
                         results.append({"label": item.get("label"), "score": item.get("score")})
+            elif isinstance(raw_result, dict):
+                 # Handle flat format (old version or single prediction)
+                 results.append({"label": raw_result.get("label"), "score": raw_result.get("score")})
             
         return results
 
@@ -111,46 +114,54 @@ class LionGuardClassifier:
         """
         Returns list of dicts: [{"label": "hate", "score": 0.9}, ...]
         """
-        import torch
-        import numpy as np
-        
-        # 1. Embed
-        # LionGuard expects embeddings. SBERT returns numpy array.
-        embeddings = self.embedder.encode([text]) # Shape: (1, 768)
-        
-        # 2. Classify
-        with torch.no_grad():
-            inputs = torch.tensor(embeddings)
-            outputs = self.classifier(inputs)
-            # Logits shape: (1, NumLabels)
-            if hasattr(outputs, "logits"):
-                logits = outputs.logits
-            elif isinstance(outputs, (list, tuple)):
-                logits = outputs[0]
-            else:
-                logits = outputs
+        try:
+            # 1. Format (Crucial Step: Add Prompt)
+            # Source: https://huggingface.co/govtech/lionguard-2-lite/blob/main/inference.py
+            formatted_text = f"task: classification | query: {text}"
+            
+            # 2. Embed
+            embeddings = self.embedder.encode([formatted_text]) 
+            
+            # 3. Classify
+            # The custom model has a .predict() method that takes embeddings
+            # and returns a dictionary of scores per category.
+            # We use that if available, otherwise fall back to raw call.
+            
+            if hasattr(self.classifier, "predict"):
+                 # Expected Output: {"category1": [score], "category2": [score]}
+                 results_dict = self.classifier.predict(embeddings)
+                 
+                 parsed_results = []
+                 # results_dict is likely {"sexual": [0.1], "hate": [0.9]...}
+                 for category, scores in results_dict.items():
+                     score = float(scores[0]) # Get score for the single input
+                     parsed_results.append({"label": category, "score": score})
+                     
+                 return parsed_results
+            
+            # Fallback for standard AutoModel usage (if .predict isn't dynamically loaded)
+            import torch
+            with torch.no_grad():
+                inputs = torch.tensor(embeddings)
+                outputs = self.classifier(inputs)
                 
-            probs = torch.softmax(logits, dim=1).numpy()[0] # [0.1, 0.9, ...]
+                if hasattr(outputs, "logits"):
+                    logits = outputs.logits
+                else:
+                    logits = outputs
+                    
+                probs = torch.softmax(logits, dim=1).numpy()[0]
+                
+            # Map Logic (Fallback)
+            id2label = self.classifier.config.id2label
+            if not id2label or str(id2label.get(0, "")).upper() == "LABEL_0":
+                 id2label = {0: "safe", 1: "toxic"}
             
-        # 3. Map to Labels
-        # If model config has id2label, use it.
-        id2label = self.classifier.config.id2label
-        
-        # Fix: Handle generic labels (LABEL_0, LABEL_1) or missing labels
-        # We assume binary classification for LionGuard: 0=Safe, 1=Unsafe (Toxic)
-        if not id2label or str(id2label.get(0, "")).upper() == "LABEL_0":
-             # lionguard-2-lite binary assumption
-             id2label = {0: "safe", 1: "toxic"}
-        
-        logger.info("Model Labels", id2label=id2label, raw_probs=probs.tolist())
+            return [{"label": id2label.get(i, f"label_{i}"), "score": float(p)} for i, p in enumerate(probs)]
 
-        results = []
-        
-        for idx, score in enumerate(probs):
-            label = id2label.get(idx, f"label_{idx}")
-            results.append({"label": label, "score": float(score)})
-            
-        return results
+        except Exception as e:
+            logger.error("LionGuard Prediction Failed", error=str(e))
+            return []
 
 def get_classifier():
     """Load the local model on first use."""
@@ -179,7 +190,12 @@ async def call_huggingface_api(text: str) -> dict:
     # 'threat' causes false positives on dates (e.g. "Feb 7th"). Switched to 'violence'.
     payload = {
         "inputs": text,
-        "parameters": {"candidate_labels": ["toxic", "insult", "violence", "hate speech", "neutral", "safe"]}
+        "parameters": {"candidate_labels": [
+            "toxic", "insult", "violence", "hate speech", 
+            "sexual", "discriminatory", 
+            "neutral", "safe", 
+            "friendly", "helpful", "joking", "professional"
+        ]}
     }
     
     logger.info("Calling HF API (Remote)", model=MODEL_REMOTE)
@@ -212,10 +228,8 @@ async def analyze_toxicity(text: str) -> Tuple[bool, float, List[str]]:
     try:
         labels_and_scores = []
         
-# Cloud Run / HTTP Configuration
-ACTIVE_MODEL = "LionGuard-2 (Cloud Run)" if config.AI_PROVIDER == "cloudrun" else f"{MODEL_REMOTE} (Remote)"
 
-# ... (omitted code) ...
+
 
         if config.AI_PROVIDER == "cloudrun" or config.AI_PROVIDER == "vertex": # Keep vertex for backward compat if needed
              # --- CLOUD RUN (Production) ---
@@ -247,9 +261,26 @@ ACTIVE_MODEL = "LionGuard-2 (Cloud Run)" if config.AI_PROVIDER == "cloudrun" els
 
         # 2. Score Calculation (Unified Logic)
         if labels_and_scores:
-            # LionGuard Labels: "hate", "harassment", "violence", "sexual", "self-harm", "toxic", "insult"
-            # BART Labels: "toxic", "insult", "violence", "hate speech"
-            bad_labels = {"toxic", "insult", "violence", "hate speech", "hate", "harassment", "sexual", "self-harm"}
+            # LionGuard Labels (Exact Keys)
+            # binary: General unsafe flag
+            # hateful_l1, hateful_l2
+            # insults
+            # sexual_l1, sexual_l2
+            # physical_violence
+            # self_harm_l1, self_harm_l2
+            # all_other_misconduct_l1, all_other_misconduct_l2
+            bad_labels = {
+                "binary", 
+                "hateful_l1", "hateful_l2", 
+                "insults", 
+                "sexual_l1", "sexual_l2", 
+                "physical_violence", 
+                "self_harm_l1", "self_harm_l2",
+                "all_other_misconduct_l1", "all_other_misconduct_l2",
+                # Existing Legacy / Fallback Labels
+                "toxic", "insult", "violence", "hate speech", "hate", "harassment", "sexual", "self-harm",
+                "discriminatory"
+            }
             
             current_score = 0.0
             found_tags = []
@@ -262,7 +293,7 @@ ACTIVE_MODEL = "LionGuard-2 (Cloud Run)" if config.AI_PROVIDER == "cloudrun" els
                         found_tags.append(f"{label} ({score:.2f})")
             
             provider_tag = config.AI_PROVIDER.capitalize()
-            logger.info(f"AI Analysis ({provider_tag})", total_score=current_score, breakdown=found_tags, original_text=text[:50])
+            logger.info(f"AI Analysis ({provider_tag})", total_score=current_score, breakdown=found_tags, original_text=text)
 
             # Threshold: 0.7 (Conservative)
             # LionGuard is sharper, but 0.7 works well for cumulative scores.
@@ -347,6 +378,7 @@ async def process_message(
     """
     
     # 1. Analyze
+    logger.info("Processing message", user_id=user_id, text=text)
     is_toxic, score, reasons = await analyze_toxicity(text)
     
     # 2. Log Message
