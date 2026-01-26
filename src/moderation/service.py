@@ -270,7 +270,7 @@ async def analyze_toxicity(text: str) -> Tuple[bool, float, List[str]]:
             # self_harm_l1, self_harm_l2
             # all_other_misconduct_l1, all_other_misconduct_l2
             bad_labels = {
-                "binary", 
+                # "binary", # Removed to prevent double counting with specific labels 
                 "hateful_l1", "hateful_l2", 
                 "insults", 
                 "sexual_l1", "sexual_l2", 
@@ -297,7 +297,7 @@ async def analyze_toxicity(text: str) -> Tuple[bool, float, List[str]]:
 
             # Threshold: 0.7 (Conservative)
             # LionGuard is sharper, but 0.7 works well for cumulative scores.
-            if current_score >= 0.7:
+            if current_score >= 0.8:
                  return True, current_score, found_tags
 
     except Exception as e:
