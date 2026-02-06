@@ -30,7 +30,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     Handles Bot startup, webhook registration, and shutdown.
     """
     logger.info("Starting application lifespan...")
-    
+    # Debug: Log Configuration (Masked)
+    logger.info("Configuration Loaded", 
+        port=config.PORT, 
+        debug=config.DEBUG, 
+        log_level=config.LOG_LEVEL,
+        ai_provider=config.AI_PROVIDER,
+        ai_service_url=config.AI_SERVICE_URL,
+        public_url=config.PUBLIC_URL,
+        has_bot_token=bool(config.TELEGRAM_BOT_TOKEN),
+    )
+
     if config.TELEGRAM_BOT_TOKEN and bot_app:
         # 1. Initialize Bot
         await bot_app.initialize()

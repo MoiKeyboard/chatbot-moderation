@@ -88,8 +88,13 @@ async def log_message(message: MessageLog):
 
     # Use a subcollection or root collection depending on your query needs. 
     # Root collection 'messages' is easier for global metrics.
-    doc_ref = db.collection('messages').document(str(message.message_id))
-    doc_ref.set(message.dict())
+    try:
+        doc_ref = db.collection('messages').document(str(message.message_id))
+        doc_ref.set(message.dict())
+        # Debug Log (Verbose, maybe remove later if too noisy)
+        logger.debug("Message logged to Firestore", message_id=message.message_id)
+    except Exception as e:
+        logger.error("Failed to log message to Firestore", error=str(e), message_id=message.message_id)
 
 async def get_global_metrics():
     """Get basic stats from Firestore."""

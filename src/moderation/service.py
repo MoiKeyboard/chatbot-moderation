@@ -193,8 +193,8 @@ async def call_huggingface_api(text: str) -> dict:
         "parameters": {"candidate_labels": [
             "toxic", "insult", "violence", "hate speech", 
             "sexual", "discriminatory", 
-            "neutral", "safe", 
-            "friendly", "helpful", "joking", "professional"
+            "harassment", "self-harm",
+            "neutral", "safe"
         ]}
     }
     
@@ -221,6 +221,7 @@ async def analyze_toxicity(text: str) -> Tuple[bool, float, List[str]]:
     Hybrid check: AI (Local/Remote) > Keyword Fallback.
     Returns: (is_toxic, score, found_keywords)
     """
+    logger.info("Analyzing toxicity...", text_snippet=text[:50] if text else "")
     
     # 1. AI Check (Phase 3)
     # Feature Toggle: Choose Provider
@@ -242,7 +243,7 @@ async def analyze_toxicity(text: str) -> Tuple[bool, float, List[str]]:
              logger.warning("Local AI provider is deprecated/disabled in this version.")
              # Fallback to zero
              
-        else:
+        elif config.AI_PROVIDER == "remote":
              # --- REMOTE INFERENCE (HuggingFace API Backup) ---
              if config.HUGGINGFACE_API_TOKEN:
                  result = await call_huggingface_api(text)
@@ -269,35 +270,72 @@ async def analyze_toxicity(text: str) -> Tuple[bool, float, List[str]]:
             # physical_violence
             # self_harm_l1, self_harm_l2
             # all_other_misconduct_l1, all_other_misconduct_l2
-            bad_labels = {
-                # "binary", # Removed to prevent double counting with specific labels 
-                "hateful_l1", "hateful_l2", 
-                "insults", 
-                "sexual_l1", "sexual_l2", 
-                "physical_violence", 
-                "self_harm_l1", "self_harm_l2",
-                "all_other_misconduct_l1", "all_other_misconduct_l2",
-                # Existing Legacy / Fallback Labels
-                "toxic", "insult", "violence", "hate speech", "hate", "harassment", "sexual", "self-harm",
-                "discriminatory"
-            }
+            # --- SCORING POLICY ---
+            # Define how to score based on the active provider
             
+            # Policy 1: LionGuard (Cloud Run)
+            # Uses a specific 'binary' flag for the overall score.
+            if config.AI_PROVIDER in ["cloudrun", "vertex"]:
+                primary_label = "binary"
+                threshold = 0.9 # High confidence required
+                
+                # Tags: Descriptive labels only
+                tag_labels = {
+                    "hateful_l1", "hateful_l2", "insults", "sexual_l1", "sexual_l2", 
+                    "physical_violence", "self_harm_l1", "self_harm_l2",
+                    "all_other_misconduct_l1", "all_other_misconduct_l2"
+                }
+
+            # Policy 2: Hugging Face API (BART / Fallback)
+            # Uses MAX score of any bad label (since BART treats them independently)
+            else:
+                primary_label = "max_score" # Placeholder name
+                threshold = 0.5 # Lower threshold for Zero-Shot
+                
+                # Tags: All bad labels
+                tag_labels = {
+                    "toxic", "insult", "violence", "hate speech", "sexual", 
+                    "discriminatory", "harassment", "self-harm"
+                }
+
             current_score = 0.0
             found_tags = []
             
+            # --- CALCULATE SCORE ---
+            if config.AI_PROVIDER in ["cloudrun", "vertex"]:
+                 # LionGuard: Trust specific label
+                 for label, score in labels_and_scores:
+                    if label == primary_label:
+                        current_score = score
+            else:
+                 # Remote: Trust MAX of any bad label
+                 current_score = max([score for label, score in labels_and_scores if label in tag_labels], default=0.0)
+
+            # --- POPULATE TAGS ---
             for label, score in labels_and_scores:
-                if label in bad_labels:
-                    # NOISE FILTER: Only count scores > 0.05
-                    if score > 0.05:
-                        current_score += score
-                        found_tags.append(f"{label} ({score:.2f})")
+                # Add Tags (For Explanation)
+                if label in tag_labels:
+                    # NOISE FILTER: Only log specific categories if > 0.3
+                    if score > 0.3:
+                         found_tags.append(f"{label} ({score:.2f})")
+            
+            # Fallback for LionGuard mismatches (SafeGuard)
+            if current_score == 0.0 and found_tags:
+                # If we have strong tags but missed the primary label, take the max tag score
+                 max_tag_score = max([float(t.split('(')[1].strip(')')) for t in found_tags], default=0.0)
+                 if max_tag_score > threshold:
+                     current_score = max_tag_score
+                     found_tags.append(f"inferred_from_tags ({current_score:.2f})")
+
+            # If no detailed tags found but it is toxic, add a generic tag
+            if current_score > threshold and not found_tags:
+                 found_tags.append(f"toxic_confidence ({current_score:.2f})")
             
             provider_tag = config.AI_PROVIDER.capitalize()
             logger.info(f"AI Analysis ({provider_tag})", total_score=current_score, breakdown=found_tags, original_text=text)
 
-            # Threshold: 0.7 (Conservative)
-            # LionGuard is sharper, but 0.7 works well for cumulative scores.
-            if current_score >= 0.8:
+            # Final Decision
+            if current_score >= threshold:
                  return True, current_score, found_tags
 
     except Exception as e:
