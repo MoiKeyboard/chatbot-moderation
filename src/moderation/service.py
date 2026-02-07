@@ -269,10 +269,11 @@ async def analyze_toxicity(text: str) -> Tuple[bool, float, List[str]]:
             # Uses a specific 'binary' flag for the overall score.
             if config.AI_PROVIDER in ["cloudrun", "vertex"]:
                 primary_label = "binary"
-                threshold = 0.95 # High confidence required
+                threshold = 0.99 # High confidence required
                 
                 # Tags: Descriptive labels only
                 tag_labels = {
+                    "binary", 
                     "hateful_l1", "hateful_l2", "insults", "sexual_l1", "sexual_l2", 
                     "physical_violence", "self_harm_l1", "self_harm_l2",
                     "all_other_misconduct_l1", "all_other_misconduct_l2"
