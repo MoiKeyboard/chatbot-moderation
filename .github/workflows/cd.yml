@@ -122,7 +122,8 @@ jobs:
           AI_PROVIDER=${{ vars.AI_PROVIDER }}
           VERTEX_PROJECT_ID=${{ env.PROJECT_ID }}
           VERTEX_LOCATION=${{ env.VERTEX_LOCATION }}
-          AI_SERVICE_URL=${{ vars.AI_SERVICE_URL }} 
+          AI_SERVICE_URL=${{ vars.AI_SERVICE_URL }}
+          ENABLE_AI_AUTH=${{ vars.ENABLE_AI_AUTH }} 
 
   # Job 3: Deploy AI Service (Heavy)
   deploy-ai:
