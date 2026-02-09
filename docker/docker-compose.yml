@@ -9,11 +9,16 @@ services:
     volumes:
       - ../src:/app/src
       - ../tests:/app/tests
+      # Required for ADC to work
+      - ${GCP_SDK_CREDENTIALS_PATH}:/root/.config/gcloud/application_default_credentials.json
     env_file:
       - ../.env
     environment:
       - FIRESTORE_EMULATOR_HOST=firestore:8080
       - PYTHONUNBUFFERED=1
+      # Required for ADC to work
+      - GOOGLE_CLOUD_PROJECT=${GCP_PROJECT_ID}
+      - GOOGLE_CLOUD_QUOTA_PROJECT=${GCP_PROJECT_ID}
     ports:
       - "8080:8080"
     depends_on:

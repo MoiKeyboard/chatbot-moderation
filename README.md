@@ -32,23 +32,31 @@ A Dockerized Telegram/WhatsApp group moderation bot that uses simple keyword det
     ```powershell
     cp .env.example .env
     ```
+    *Optionally set `GCP_SDK_CREDENTIALS_PATH` in `.env` if you want to override the default credentials location.*
 
-4.  **Start Tunnel (Required for Webhooks)**:
+4.  **Authenticate (Zero Config)**:
+    Run this command to login to Google Cloud and set up your Application Default Credentials (ADC) automatically:
+    ```powershell
+    .\manage.ps1 auth
+    ```
+
+5.  **Start Tunnel (Required for Webhooks)**:
     ```powershell
     .\manage.ps1 expose
     ```
     *Copy the HTTPS URL generated (e.g. `https://xyz.ngrok.app`) and update `PUBLIC_URL` in `.env` (or use a static domain).*
 
-5.  **Start the Application**:
+6.  **Start the Application**:
     ```powershell
     .\manage.ps1 up
     ```
     This will:
+    *   **Mount your Google Credentials** automatically into the Docker container.
     *   Build the development Docker container (Uvicorn + FastAPI).
     *   Start the Firestore Emulator.
     *   **Auto-register** the Telegram Webhook and Menu Commands.
 
-6.  **Verify**:
+7.  **Verify**:
     Open Telegram and chat with your bot. It should respond to `/start` and filter toxic keywords.
 
 ## 🧠 AI Configuration
@@ -71,6 +79,8 @@ We use `manage.ps1` (Windows) as a task runner.
 
 | Command                 | Description                                          |
 | :---------------------- | :--------------------------------------------------- |
+| `.\manage.ps1 auth`     | Login to Google Cloud and update ADC credentials.    |
+| `.\manage.ps1 deps`     | Install dependencies (like Cloud SDK) via Winget.    |
 | `.\manage.ps1 up`       | Start the app (Hot Reload) and DB emulator.          |
 | `.\manage.ps1 down`     | Stop and remove all containers.                      |
 | `.\manage.ps1 expose`   | Start ngrok tunnel to expose port 8080.              |

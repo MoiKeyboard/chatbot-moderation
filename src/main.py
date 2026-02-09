@@ -8,6 +8,7 @@ from telegram import Update, BotCommand
 from src.config import config
 from src.database import db
 from src.telegram_bot.bot import create_application
+from src.utils.auth import verify_webhook_token
 
 # Configure structured logging
 structlog.configure(
@@ -100,8 +101,7 @@ async def telegram_webhook(request: Request):
     """Handle incoming Telegram updates via Webhook."""
     # SECURITY: Verify Secret Token
     secret_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
-    if secret_token != config.SECRET_TOKEN:
-        logger.warning("Unauthorized webhook access attempt", token_received=secret_token)
+    if not verify_webhook_token(secret_token, config.SECRET_TOKEN):
         return JSONResponse(
             content={"error": "Unauthorized"}, 
             status_code=status.HTTP_401_UNAUTHORIZED

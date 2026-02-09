@@ -10,6 +10,7 @@ from telegram.error import BadRequest
 from src.config import config
 from src.models import MessageLog, User
 from src.database import log_message, increment_warning, get_user, create_or_update_user
+from src.utils.auth import get_oidc_token
 
 logger = structlog.get_logger()
 
@@ -37,8 +38,17 @@ async def call_cloud_run(text: str) -> List[dict]:
         # Standard format for our container: {"instances": [{"text": "message"}]}
         payload = {"instances": [{"text": text}]}
         
+        # Security: Get OIDC Token (if needed)
+        token = get_oidc_token(config.AI_SERVICE_URL)
+        headers = {}
+        if token:
+             headers["Authorization"] = f"Bearer {token}"
+             logger.info("Attached OIDC Token for Security")
+        else:
+             logger.debug("No OIDC Token attached (Public or Localhost)")
+        
         async with httpx.AsyncClient() as client:
-            response = await client.post(config.AI_SERVICE_URL, json=payload, timeout=60.0)
+            response = await client.post(config.AI_SERVICE_URL, json=payload, headers=headers, timeout=60.0)
             
             if response.status_code != 200:
                 logger.error("Cloud Run Failed", status=response.status_code, body=response.text)

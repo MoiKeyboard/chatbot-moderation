@@ -18,13 +18,12 @@ class Config:
     FIRESTORE_DB_NAME: str = os.getenv("FIRESTORE_DB_NAME", "")
     FIRESTORE_EMULATOR_HOST: str = os.getenv("FIRESTORE_EMULATOR_HOST", "")
     
-    # AI Configuration (Feature Toggle)
-    # AI Configuration (Feature Toggle)
     # Options: "cloudrun" (LionGuard on Cloud Run), "remote" (Hugging Face API Backup), "local" (Disabled)
     AI_PROVIDER: str = os.getenv("AI_PROVIDER", "cloudrun") 
     
     # Cloud Run / Remote Service Configuration
     AI_SERVICE_URL: str = os.getenv("AI_SERVICE_URL", "") # Full URL to /predict
+    ENABLE_AI_AUTH: bool = str(os.getenv("ENABLE_AI_AUTH", "False")).lower() == "true" # Feature Flag for OIDC between webhook interface and AI Service
     
     # Legacy / Optional
     VERTEX_PROJECT_ID: str = os.getenv("VERTEX_PROJECT_ID", os.getenv("GCP_PROJECT_ID", ""))
