@@ -24,6 +24,7 @@ class Config:
     # Cloud Run / Remote Service Configuration
     AI_SERVICE_URL: str = os.getenv("AI_SERVICE_URL", "") # Full URL to /predict
     ENABLE_AI_AUTH: bool = str(os.getenv("ENABLE_AI_AUTH", "False")).lower() == "true" # Feature Flag for OIDC between webhook interface and AI Service
+    GCP_ID_TOKEN: str = os.getenv("GCP_ID_TOKEN", "") # Injected OIDC Token for local dev
     
     # Legacy / Optional
     VERTEX_PROJECT_ID: str = os.getenv("VERTEX_PROJECT_ID", os.getenv("GCP_PROJECT_ID", ""))

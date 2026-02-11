@@ -23,21 +23,16 @@ if ($args.Count -eq 0) {
 $Command = $args[0]
 
 function Initialize-ADC-Path {
-    # 1. Try to load GCP_SDK_CREDENTIALS_PATH from .env if not already set
-    if (-not $env:GCP_SDK_CREDENTIALS_PATH -and (Test-Path .env)) {
-        Get-Content .env | Where-Object { $_ -match "^GCP_SDK_CREDENTIALS_PATH=" } | ForEach-Object {
-            $env:GCP_SDK_CREDENTIALS_PATH = $_.Split('=', 2)[1].Trim()
-        }
-    }
-
-    # 2. If still not set, try dynamic detection (Default for Windows)
-    if (-not $env:GCP_SDK_CREDENTIALS_PATH) {
-        $PotentialPath = "$env:APPDATA\gcloud\application_default_credentials.json"
-        if (Test-Path $PotentialPath) {
-            $env:GCP_SDK_CREDENTIALS_PATH = $PotentialPath
-        } else {
-            # Fallback to User Profile (sometimes used in other configs)
-            $env:GCP_SDK_CREDENTIALS_PATH = "$env:USERPROFILE\.config\gcloud\application_default_credentials.json"
+    # 1. Try dynamic detection (Default for Windows) - PRIORITY
+    $PotentialPath = "$env:APPDATA\gcloud\application_default_credentials.json"
+    if (Test-Path $PotentialPath) {
+        $env:GCP_SDK_CREDENTIALS_PATH = $PotentialPath
+    } elseif (-not $env:GCP_SDK_CREDENTIALS_PATH) {
+         # 2. Fallback to .env if not found in default location
+        if (Test-Path .env) {
+            Get-Content .env | Where-Object { $_ -match "^GCP_SDK_CREDENTIALS_PATH=" } | ForEach-Object {
+                $env:GCP_SDK_CREDENTIALS_PATH = $_.Split('=', 2)[1].Trim()
+            }
         }
     }
     
@@ -47,6 +42,61 @@ function Initialize-ADC-Path {
 # Run detection globally
 $ADC_Ready = Initialize-ADC-Path
 
+function Get-OIDC-Token {
+    # Check if AI_SERVICE_URL is set matches a valid schema
+    $AI_Service_Url = $env:AI_SERVICE_URL
+    
+    # PowerShell env var doesn't always reflect .env unless loaded, so double check .env
+    if (-not $AI_Service_Url -and (Test-Path .env)) {
+            $AI_Service_Url = (Get-Content .env | Where-Object { $_ -match "^AI_SERVICE_URL=" } | ForEach-Object { $_.Split('=', 2)[1].Trim('"') })
+    }
+
+    if (-not $AI_Service_Url) { return $null }
+
+    # Parse Audience
+    if ($AI_Service_Url -match "^(https?://[^/]+)") {
+        $Audience = $matches[1]
+        Write-Host "Fetching OIDC Token for: $Audience" -ForegroundColor Cyan
+        
+        # Strategy: Impersonate Default Compute Service Account
+        $ComputeSA = (gcloud iam service-accounts list --filter="email:compute" --format="value(email)" 2>$null | Select-Object -First 1)
+
+        $ImpersonateFlag = ""
+        if ($ComputeSA) {
+            Write-Host "Using Identity: $ComputeSA (Impersonation)" -ForegroundColor Cyan
+            $ImpersonateFlag = "--impersonate-service-account=$ComputeSA"
+        } else {
+            Write-Host "Using Identity: User Credentials (Direct)" -ForegroundColor Yellow
+        }
+
+        try {
+            # Run gcloud command
+            # Note: Remove 2>&1 to avoid capturing warnings in the token variable
+            # But we need to capture errors if it fails.
+            # Better approach: Capture all, filter for the token (starts with eyJ)
+            $Output = gcloud auth print-identity-token --audiences=$Audience $ImpersonateFlag 2>&1
+            
+            if ($LASTEXITCODE -eq 0) {
+                # Filter for the actual token frame (it's a long string starting with eyJ)
+                $Token = $Output | Where-Object { $_ -match "^eyJ" } | Select-Object -First 1
+                
+                if ($Token) {
+                    Write-Host "Token Generated Successfully." -ForegroundColor Green
+                    return $Token
+                } else {
+                    Write-Host "Token Generation Succeeded but Output was unexpected." -ForegroundColor Yellow
+                    Write-Host "Output: $Output" -ForegroundColor Gray
+                }
+            } else {
+                Write-Host "Token Generation Failed." -ForegroundColor Red
+                Write-Host $Output -ForegroundColor Red # Print error output
+            }
+        } catch {
+            Write-Host "Error running gcloud: $_" -ForegroundColor Red
+        }
+    }
+    return $null
+}
 
 switch ($Command) {
     "up" {
@@ -56,6 +106,10 @@ switch ($Command) {
              Write-Host "Warning: ADC credentials ($env:GCP_SDK_CREDENTIALS_PATH) not found. OIDC Auth will fail." -ForegroundColor Yellow
         }
         
+        # Inject OIDC Token (if needed)
+        $Token = Get-OIDC-Token
+        if ($Token) { $env:GCP_ID_TOKEN = $Token }
+
         # Explicitly pass .env file for variable substitution in YAML
         docker-compose --env-file .env -f docker/docker-compose.yml -p chatbot-moderation up --build
     }

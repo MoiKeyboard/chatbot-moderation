@@ -16,9 +16,8 @@ services:
     environment:
       - FIRESTORE_EMULATOR_HOST=firestore:8080
       - PYTHONUNBUFFERED=1
-      # Required for ADC to work
-      - GOOGLE_CLOUD_PROJECT=${GCP_PROJECT_ID}
-      - GOOGLE_CLOUD_QUOTA_PROJECT=${GCP_PROJECT_ID}
+      # Runtime generated token for local dev
+      - GCP_ID_TOKEN=${GCP_ID_TOKEN}
     ports:
       - "8080:8080"
     depends_on:

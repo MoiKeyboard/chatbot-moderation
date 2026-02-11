@@ -26,16 +26,21 @@ def get_oidc_token(audience: str) -> Optional[str]:
     Returns:
         Optional[str]: The ID token string, or None if not available/needed.
     """
+    # 1. Feature Flag
     if not audience or not config.ENABLE_AI_AUTH:
         return None
 
-    # 1. Localhost Bypass
+    # 2. Localhost Bypass
     # If calling a local container, we assume it's inside our private network/docker-compose
     # and doesn't need an OIDC token (or can't validate one).
     if "localhost" in audience or "127.0.0.1" in audience or "host.docker.internal" in audience:
         return None
 
-    # 2. Production / ADC
+    # 3. Local Dev: Use Host-Injected OIDC Token 
+    if config.GCP_ID_TOKEN:
+        return config.GCP_ID_TOKEN
+
+    # 4. Production / ADC
     try:
         # A. Try to generate an OIDC Identity Token (Standard for Service-to-Service)
         # This works on Cloud Run (Service Account) but fails locally with User Credentials.
