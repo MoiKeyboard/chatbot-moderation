@@ -16,7 +16,27 @@ A Dockerized Telegram/WhatsApp group moderation bot that uses simple keyword det
 *   [Google Cloud Account](https://cloud.google.com/) for the production deployment.
 *   Access to gated models: [gemma](https://huggingface.co/google/gemma-300m) 
 
-### Setup
+### Architecture
+
+### Production Infrastructure
+
+```mermaid
+graph LR
+    User((User)) -->|Message| TG[Telegram API]
+    TG -->|Webhook| App[**Cloud Run: Chatbot App*]
+
+    subgraph "Google Cloud Project"
+        App -->|Read/Write| DB[(Firestore)]
+        App -->|Authenticated Request| AI[**Cloud Run: AI Service**]
+        
+        AI -.->|Pull Image| AR[Artifact Registry]
+    end
+
+    classDef gcp fill:#e8f0fe,stroke:#4285f4,stroke-width:2px;
+    class App,AI,DB,AR gcp;
+```
+
+## Setup
 
 1.  **Clone the repository**.
 2.  **Telegram Configuration (Critical)**:
